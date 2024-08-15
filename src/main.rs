@@ -76,34 +76,24 @@ fn main() -> ! {
         pac.I2C1,
         sda,
         scl, // Try `not_an_scl_pin` here
-        10.kHz(),
+        100.kHz(),
         &mut pac.RESETS,
         &clocks.system_clock,
     );
     
-    
-    
-  
-        // let not_an_scl_pin: Pin<_, FunctionI2C, PullUp> = pins.gpio20.rec
-    // This is the correct pin on the Raspberry Pico board. On other boards, even if they have an
-    // on-board LED, it might need to be changed.
-    //
-    // Notably, on the Pico W, the LED is not connected to any of the RP2040 GPIOs but to the cyw43 module instead.
-    // One way to do that is by using [embassy](https://github.com/embassy-rs/embassy/blob/main/examples/rp/src/bin/wifi_blinky.rs)
-    //
-    // If you have a Pico W and want to toggle a LED with a simple GPIO output pin, you can connect an external
-    // LED to one of the GPIO pins, and reference that pin here. Don't forget adding an appropriate resistor
-    // in series with the LED.
-
-    // let mut led_pin = pins.led.into_push_pull_output();
     let mut en_pin = pins.gpio20.into_push_pull_output_in_state(PinState::Low);
-    let mut nrdy_pin =pins.gpio21.as_input();
+    let mut nrdy_pin =pins.gpio21.into_pull_up_input();
 
  
-    let sensor_CO2 = Sunrise::new(i2c, delay, en_pin, nrdy_pin);
-        
+    let mut sensor_CO2 = Sunrise::new(i2c, & mut delay, en_pin, nrdy_pin);
+
+    let init_sensor = Sunrise::init(&mut sensor_CO2);
+    let get_data = Sunrise::single_measurement_get(&mut sensor_CO2);
+    
     loop {
 
+    
+    delay.delay_ms(1000);
 
     }
 }

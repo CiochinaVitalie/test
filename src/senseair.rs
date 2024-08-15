@@ -10,6 +10,7 @@ use heapless::Vec;
 
 const EXPECT_MSG: &str = "Vec was not large enough";
 const ADDRESS: u8 = 0x68;
+static mut STATE_DATA: [u8; 24] = [0x00;24];
 pub enum  Registers{
     ErrorStatus             = 0x00,
     MeasuredFilteredPc      = 0x06,
@@ -39,33 +40,36 @@ pub struct Measurement {
     pub temperature: u16,
 }
 
-pub struct Sunrise<T,D,EN,NRDY> {
+pub struct Sunrise<'a,T,D,EN,NRDY> {
     comm: T,
-    delay: D,
+    delay: &'a mut D,
     en_pin:EN,
     n_rdy_pin:NRDY,
     address: u8,
+    state_buf:[u8;24]
 }
 
-impl<T, E, D,EN,NRDY> Sunrise<T,D,EN,NRDY> where T: Read<Error = E> + Write<Error = E>, D:DelayMs<u32>,EN:OutputPin,NRDY:InputPin {
+impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Write<Error = E>, D:DelayMs<u32> + 'a,EN:OutputPin,NRDY:InputPin {
     
-    pub fn new_with_address(i2c: T, address: u8,delay:D,en_pin:EN,nrdy_pin:NRDY) -> Self {
+    pub fn new_with_address(i2c: T, address: u8,delay:&'a mut D,en_pin:EN,nrdy_pin:NRDY) -> Self {
         Sunrise {
             comm: i2c,
             delay:delay,
             en_pin:en_pin,
             n_rdy_pin:nrdy_pin,
-            address
+            address,
+            state_buf:[0x00;24]
         }
     }
 
-    pub fn new(i2c: T, delay:D,en_pin:EN,nrdy_pin:NRDY) -> Self {
+    pub fn new(i2c: T, delay:&'a mut D,en_pin:EN,nrdy_pin:NRDY) -> Self {
         Sunrise {
             comm: i2c,
             delay:delay,
             en_pin:en_pin,
             n_rdy_pin:nrdy_pin,
-            address: ADDRESS
+            address: ADDRESS,
+            state_buf:[0x00;24]
         }
     }
 
@@ -79,13 +83,27 @@ impl<T, E, D,EN,NRDY> Sunrise<T,D,EN,NRDY> where T: Read<Error = E> + Write<Erro
         Ok(u16::from_be_bytes(buf))
     }
 
-     fn sensor_state_data_get(&mut self) -> Result<[u8; 24], E> {
-        let mut buf = [0u8; 24];
-       
-        self.comm.write(self.address, &(Registers::StartMesurement as u8).to_be_bytes())?;
-        self.comm.read(self.address, &mut buf)?;
-        
-        Ok(buf)
+    fn single_measurement_set(&mut self) -> Result<(), E> {
+        let mut vec: Vec<u8, 26> = Vec::new();
+        vec.extend_from_slice(&(Registers::StartMesurement as u8).to_be_bytes()).expect(EXPECT_MSG);
+        vec.extend_from_slice(&(0x01 as u8).to_be_bytes()).expect(EXPECT_MSG);
+        vec.extend_from_slice(&self.state_buf).expect(EXPECT_MSG);
+        self.comm.write(self.address, &vec)
+    }
+
+    fn sensor_state_data_get(&mut self) -> Result<(), E> {
+
+        self.comm.write(self.address, &(Registers::AbcTime as u8).to_be_bytes())?;
+        self.comm.read(self.address, &mut self.state_buf)
+    }
+
+    pub fn init (&mut self) -> Result<(), E> {
+
+        let _ = self.en_pin.set_high();
+        self.delay.delay_ms(35);
+        self.sensor_state_data_get()?;
+        let _ = self.en_pin.set_low();
+        Ok(())
     }
 
     pub fn single_measurement_get(&mut self) -> Result<[u8; 8], E> {
@@ -94,22 +112,22 @@ impl<T, E, D,EN,NRDY> Sunrise<T,D,EN,NRDY> where T: Read<Error = E> + Write<Erro
         let _ = self.en_pin.set_high();
         self.delay.delay_ms(35);
 
-        if let Ok(state_dat) = self.sensor_state_data_get()
+        self.single_measurement_set()?;
+
+        loop
         {
-            vec.extend_from_slice(&(Registers::MeasurementMode as u8).to_be_bytes()).expect(EXPECT_MSG);
-            vec.extend_from_slice(&state_dat).expect(EXPECT_MSG);
-            self.comm.write(self.address, &vec)?;
-            
+            if let Ok(true) = self.n_rdy_pin.is_low()
+            {
+               break; 
+            }
         }
         self.delay.delay_ms(2500);
+        self.comm.write(self.address, &(Registers::ErrorStatus as u8).to_be_bytes())?;
+        self.comm.read(self.address, &mut buf)?;
 
-        if let Ok(true) = self.n_rdy_pin.is_low()
-        {
-            self.comm.read(self.address, &mut buf)?;
+        self.sensor_state_data_get()?;
 
-        }else {
-            
-        }
+
         let _ = self.en_pin.set_low();
         Ok(buf)
      
