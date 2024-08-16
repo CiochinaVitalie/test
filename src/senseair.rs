@@ -30,7 +30,7 @@ pub enum  Registers{
     MeasurementMode         = 0x95,
     MeterControl            = 0xA5,
     StartMesurement         = 0xC3,
-    AbcTime                 = 0xC4
+    AbcTime                 = 0xC4,
 }
 
 /////////////////////////////////////////////////////////////////
@@ -97,11 +97,39 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         self.comm.read(self.address, &mut self.state_buf)
     }
 
-    pub fn init (&mut self) -> Result<(), E> {
+    pub fn init (&mut self,press_comp:bool, iir_filter:bool, abc:bool) -> Result<(), E> {
 
+        let mut ctr_reg:u8 = 0;
+        let mut vec: Vec<u8, 2> = Vec::new();
         let _ = self.en_pin.set_high();
         self.delay.delay_ms(35);
         self.sensor_state_data_get()?;
+
+        self.comm.write(self.address, &(Registers::MeterControl as u8).to_be_bytes())?;
+        self.comm.read(self.address, &mut (ctr_reg).to_be_bytes())?;
+        vec.extend_from_slice(&(Registers::MeterControl as u8).to_be_bytes()).expect(EXPECT_MSG);
+
+        ctr_reg = if iir_filter {
+            ctr_reg & 0xF3
+        } else {
+            ctr_reg | 0xFC
+        };
+        
+        ctr_reg = if press_comp {
+            ctr_reg & 0xEF
+        } else {
+            ctr_reg | 0xF0
+        };
+
+        ctr_reg = if abc {
+            ctr_reg & 0xFD
+        } else {
+            ctr_reg |  0x02
+        };
+
+        vec.extend_from_slice(&(ctr_reg).to_be_bytes()).expect(EXPECT_MSG);
+        self.comm.write(self.address, &vec);
+
         let _ = self.en_pin.set_low();
         Ok(())
     }
@@ -121,7 +149,6 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
                break; 
             }
         }
-        self.delay.delay_ms(2500);
         self.comm.write(self.address, &(Registers::ErrorStatus as u8).to_be_bytes())?;
         self.comm.read(self.address, &mut buf)?;
 

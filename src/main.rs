@@ -82,17 +82,16 @@ fn main() -> ! {
     );
     
     let mut en_pin = pins.gpio20.into_push_pull_output_in_state(PinState::Low);
-    let mut nrdy_pin =pins.gpio21.into_pull_up_input();
+    let mut nrdy_pin =pins.gpio21.as_input();
 
  
     let mut sensor_CO2 = Sunrise::new(i2c, & mut delay, en_pin, nrdy_pin);
 
-    let init_sensor = Sunrise::init(&mut sensor_CO2);
-    let get_data = Sunrise::single_measurement_get(&mut sensor_CO2);
+    sensor_CO2.init(false,true,false).unwrap();
+    sensor_CO2.single_measurement_get().unwrap();
     
     loop {
 
-    
     delay.delay_ms(1000);
 
     }
