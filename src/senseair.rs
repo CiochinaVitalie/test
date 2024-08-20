@@ -128,7 +128,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         };
 
         vec.extend_from_slice(&(ctr_reg).to_be_bytes()).expect(EXPECT_MSG);
-        self.comm.write(self.address, &vec);
+        self.comm.write(self.address, &vec)?;
 
         let _ = self.en_pin.set_low();
         Ok(())

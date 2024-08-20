@@ -66,13 +66,13 @@ fn main() -> ! {
         sio.gpio_bank0,
         &mut pac.RESETS,
     );
-
+    let t = delay.borrow_mut();
         // Configure two pins as being I²C, not GPIO
     let sda: Pin<_, FunctionI2C, _> = pins.gpio18.reconfigure();
     let scl: Pin<_, FunctionI2C, _> = pins.gpio19.reconfigure();
    
 
-    let mut i2c = bsp::hal::I2C::i2c1(
+    let i2c = bsp::hal::I2C::i2c1(
         pac.I2C1,
         sda,
         scl, // Try `not_an_scl_pin` here
@@ -81,18 +81,18 @@ fn main() -> ! {
         &clocks.system_clock,
     );
     
-    let mut en_pin = pins.gpio20.into_push_pull_output_in_state(PinState::Low);
-    let mut nrdy_pin =pins.gpio21.as_input();
+    let en_pin = pins.gpio20.into_push_pull_output_in_state(PinState::Low);
+    let nrdy_pin =pins.gpio21.as_input();
 
  
     let mut sensor_CO2 = Sunrise::new(i2c, & mut delay, en_pin, nrdy_pin);
 
     sensor_CO2.init(false,true,false).unwrap();
-    sensor_CO2.single_measurement_get().unwrap();
     
     loop {
 
-    delay.delay_ms(1000);
+    sensor_CO2.single_measurement_get().unwrap();
+    t.delay_ms(1000);
 
     }
 }
