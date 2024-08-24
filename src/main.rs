@@ -6,7 +6,9 @@
 
 
 mod senseair;
-use core::borrow::BorrowMut;
+use core::cell::RefCell;
+use cortex_m::interrupt::{self, Mutex};
+
 
 use bsp::entry;
 use defmt::*;
@@ -16,14 +18,15 @@ use panic_probe as _;
 
 use embedded_hal::blocking::i2c::{Read, Write};
 
-
 use rp_pico::hal::gpio::PinState;
 use rp_pico::pac::adc::result;
 // Provide an alias for our BSP so we can switch targets quickly.
 // Uncomment the BSP you included in Cargo.toml, the rest of the code does not need to change.
 use rp_pico as bsp;
 use bsp::hal::fugit::RateExtU32;
-// use sparkfun_pro_micro_rp2040 as bsp;
+
+use lps22hb::*;
+use lps22hb::interface::{I2cInterface,i2c::I2cAddress};
 
 use bsp::hal::{
     clocks::{init_clocks_and_plls, Clock},
@@ -35,6 +38,8 @@ use bsp::hal::{
 use senseair::Sunrise;
 
 const ADDRESS: u8 = 0x68;
+//static mut GLOBAL_DELAY:Option<cortex_m::delay::Delay> = None;
+static mut GLOBAL_DELAY: Option<cortex_m::delay::Delay> = None;
 
 #[entry]
 fn main() -> ! {
@@ -58,7 +63,11 @@ fn main() -> ! {
     .ok()
     .unwrap();
 
-    let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
+    //let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
+    unsafe{
+        GLOBAL_DELAY = Some(cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz()));
+    }
+    
 
     let pins = bsp::Pins::new(
         pac.IO_BANK0,
@@ -66,13 +75,13 @@ fn main() -> ! {
         sio.gpio_bank0,
         &mut pac.RESETS,
     );
-    let t = delay.borrow_mut();
+
         // Configure two pins as being I²C, not GPIO
     let sda: Pin<_, FunctionI2C, _> = pins.gpio18.reconfigure();
     let scl: Pin<_, FunctionI2C, _> = pins.gpio19.reconfigure();
    
 
-    let i2c = bsp::hal::I2C::i2c1(
+    let mut i2c =  bsp::hal::I2C::i2c1(
         pac.I2C1,
         sda,
         scl, // Try `not_an_scl_pin` here
@@ -80,19 +89,31 @@ fn main() -> ! {
         &mut pac.RESETS,
         &clocks.system_clock,
     );
+
+   
     
     let en_pin = pins.gpio20.into_push_pull_output_in_state(PinState::Low);
     let nrdy_pin =pins.gpio21.as_input();
 
- 
-    let mut sensor_CO2 = Sunrise::new(i2c, & mut delay, en_pin, nrdy_pin);
+    let mut  test:Option<Sunrise<rp_pico::hal::I2C<pac::I2C1, (Pin<rp_pico::hal::gpio::bank0::Gpio18, rp_pico::hal::gpio::FunctionI2c, rp_pico::hal::gpio::PullUp>, Pin<rp_pico::hal::gpio::bank0::Gpio19, rp_pico::hal::gpio::FunctionI2c, rp_pico::hal::gpio::PullUp>)>, cortex_m::delay::Delay, Pin<rp_pico::hal::gpio::bank0::Gpio20, rp_pico::hal::gpio::FunctionSio<rp_pico::hal::gpio::SioOutput>, rp_pico::hal::gpio::PullDown>, rp_pico::hal::gpio::AsInputPin<rp_pico::hal::gpio::bank0::Gpio21, rp_pico::hal::gpio::FunctionNull, rp_pico::hal::gpio::PullDown>> > = None;
 
-    sensor_CO2.init(false,true,false).unwrap();
+    unsafe {
+        if let Some(delay) = GLOBAL_DELAY.as_mut() {
+            test = Some(Sunrise::new(i2c, delay, en_pin, nrdy_pin));
+        }
+    }
+
+    // let mut sensor_CO2 = Sunrise::new(i2c, & mut delay, en_pin, nrdy_pin);
+
+    // sensor_CO2.init(false,true,false).unwrap();
+    if let Some(value) = test{
+        
+    }
+    
     
     loop {
 
-    sensor_CO2.single_measurement_get().unwrap();
-    t.delay_ms(1000);
+ //   sensor_CO2.single_measurement_get().unwrap();
 
     }
 }
