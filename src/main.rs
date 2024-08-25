@@ -8,9 +8,9 @@
 mod senseair;
 use core::cell::RefCell;
 use cortex_m::interrupt::{self, Mutex};
+use cortex_m::delay::Delay;
 
-
-use bsp::entry;
+use rp_pico::entry;
 use defmt::*;
 use defmt_rtt as _;
 use embedded_hal::digital::v2::OutputPin;
@@ -18,28 +18,25 @@ use panic_probe as _;
 
 use embedded_hal::blocking::i2c::{Read, Write};
 
-use rp_pico::hal::gpio::PinState;
-use rp_pico::pac::adc::result;
-// Provide an alias for our BSP so we can switch targets quickly.
-// Uncomment the BSP you included in Cargo.toml, the rest of the code does not need to change.
-use rp_pico as bsp;
-use bsp::hal::fugit::RateExtU32;
+use rp_pico::hal::fugit::RateExtU32;
 
 use lps22hb::*;
 use lps22hb::interface::{I2cInterface,i2c::I2cAddress};
 
-use bsp::hal::{
+use rp_pico::hal::{
     clocks::{init_clocks_and_plls, Clock},
     pac,
+    I2C,
+    pac::I2C1,   
     sio::Sio,
     watchdog::Watchdog,
-    gpio::{FunctionI2C, Pin,OutputOverride},
+    gpio::{FunctionI2C,FunctionI2c,Pin,OutputOverride,PinState,PullUp,PullDown,bank0::{Gpio18,Gpio19,Gpio20,Gpio21},FunctionSio,SioOutput,SioInput},
 };
 use senseair::Sunrise;
 
 const ADDRESS: u8 = 0x68;
 //static mut GLOBAL_DELAY:Option<cortex_m::delay::Delay> = None;
-static mut GLOBAL_DELAY: Option<cortex_m::delay::Delay> = None;
+static mut GLOBAL_DELAY: Option<Delay> = None;
 
 #[entry]
 fn main() -> ! {
@@ -63,13 +60,13 @@ fn main() -> ! {
     .ok()
     .unwrap();
 
-    //let mut delay = cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
+    //let mut delay = Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
     unsafe{
-        GLOBAL_DELAY = Some(cortex_m::delay::Delay::new(core.SYST, clocks.system_clock.freq().to_Hz()));
+        GLOBAL_DELAY = Some(Delay::new(core.SYST, clocks.system_clock.freq().to_Hz()));
     }
     
 
-    let pins = bsp::Pins::new(
+    let pins = rp_pico::Pins::new(
         pac.IO_BANK0,
         pac.PADS_BANK0,
         sio.gpio_bank0,
@@ -81,7 +78,7 @@ fn main() -> ! {
     let scl: Pin<_, FunctionI2C, _> = pins.gpio19.reconfigure();
    
 
-    let mut i2c =  bsp::hal::I2C::i2c1(
+    let i2c =  rp_pico::hal::I2C::i2c1(
         pac.I2C1,
         sda,
         scl, // Try `not_an_scl_pin` here
@@ -93,28 +90,34 @@ fn main() -> ! {
    
     
     let en_pin = pins.gpio20.into_push_pull_output_in_state(PinState::Low);
-    let nrdy_pin =pins.gpio21.as_input();
+    let nrdy_pin =pins.gpio21.into_pull_up_input();
 
-    let mut  test:Option<Sunrise<rp_pico::hal::I2C<pac::I2C1, (Pin<rp_pico::hal::gpio::bank0::Gpio18, rp_pico::hal::gpio::FunctionI2c, rp_pico::hal::gpio::PullUp>, Pin<rp_pico::hal::gpio::bank0::Gpio19, rp_pico::hal::gpio::FunctionI2c, rp_pico::hal::gpio::PullUp>)>, cortex_m::delay::Delay, Pin<rp_pico::hal::gpio::bank0::Gpio20, rp_pico::hal::gpio::FunctionSio<rp_pico::hal::gpio::SioOutput>, rp_pico::hal::gpio::PullDown>, rp_pico::hal::gpio::AsInputPin<rp_pico::hal::gpio::bank0::Gpio21, rp_pico::hal::gpio::FunctionNull, rp_pico::hal::gpio::PullDown>> > = None;
-
+    //let mut  test:Option<Sunrise<rp_pico::hal::I2C<pac::I2C1, (Pin<rp_pico::hal::gpio::bank0::Gpio18, rp_pico::hal::gpio::FunctionI2c, rp_pico::hal::gpio::PullUp>, Pin<rp_pico::hal::gpio::bank0::Gpio19, rp_pico::hal::gpio::FunctionI2c, rp_pico::hal::gpio::PullUp>)>, cortex_m::delay::Delay, Pin<rp_pico::hal::gpio::bank0::Gpio20, rp_pico::hal::gpio::FunctionSio<rp_pico::hal::gpio::SioOutput>, rp_pico::hal::gpio::PullDown>, rp_pico::hal::gpio::AsInputPin<rp_pico::hal::gpio::bank0::Gpio21, rp_pico::hal::gpio::FunctionNull, rp_pico::hal::gpio::PullDown>> > = None;
+    let mut  test:Option<Sunrise<I2C<I2C1, (Pin<Gpio18, FunctionI2c, PullUp>, Pin<Gpio19, FunctionI2c, PullUp>)>, Delay, Pin<Gpio20, FunctionSio<SioOutput>, PullDown>, Pin<Gpio21, FunctionSio<SioInput>, PullUp>>> = None;
     unsafe {
         if let Some(delay) = GLOBAL_DELAY.as_mut() {
             test = Some(Sunrise::new(i2c, delay, en_pin, nrdy_pin));
         }
     }
+    let mut sensor_CO2 = test.take().unwrap();
+ //   let mut sensor_CO2 = Sunrise::new(i2c, & mut delay, en_pin, nrdy_pin);
 
-    // let mut sensor_CO2 = Sunrise::new(i2c, & mut delay, en_pin, nrdy_pin);
+    sensor_CO2.init(false,true,false).unwrap();
 
-    // sensor_CO2.init(false,true,false).unwrap();
-    if let Some(value) = test{
-        
-    }
     
     
     loop {
 
- //   sensor_CO2.single_measurement_get().unwrap();
+    let data = sensor_CO2.single_measurement_get().unwrap();
+    
+    let sensor_data = ((data[6] as u16) << 8) | (data[7] as u16);
+    info!("Read data is {}",sensor_data);
 
+    unsafe {
+        if let Some(delay) = GLOBAL_DELAY.as_mut() {
+            delay.delay_ms(15000);
+        }
+    }
     }
 }
 

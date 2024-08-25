@@ -30,6 +30,7 @@ pub enum  Registers{
     MeterControl            = 0xA5,
     StartMesurement         = 0xC3,
     AbcTime                 = 0xC4,
+    ClearErrorStatus        = 0x9D
 }
 
 /////////////////////////////////////////////////////////////////
@@ -89,7 +90,12 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         vec.extend_from_slice(&self.state_buf).expect(EXPECT_MSG);
         self.comm.write(self.address, &vec)
     }
-
+    fn clear_error_status(&mut self) -> Result<(), E> {
+        let mut vec: Vec<u8, 2> = Vec::new();
+        vec.extend_from_slice(&(Registers::ClearErrorStatus as u8).to_be_bytes()).expect(EXPECT_MSG);
+        vec.extend_from_slice(&(0x00 as u8).to_be_bytes()).expect(EXPECT_MSG);
+        self.comm.write(self.address, &vec)
+    }
     fn sensor_state_data_get(&mut self) -> Result<(), E> {
 
         self.comm.write(self.address, &(Registers::AbcTime as u8).to_be_bytes())?;
@@ -134,20 +140,22 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
     }
 
     pub fn single_measurement_get(&mut self) -> Result<[u8; 8], E> {
-        let mut vec: Vec<u8, 25> = Vec::new();
+        let mut vec: Vec<u8, 2> = Vec::new();
         let mut buf = [0u8; 8];
         let _ = self.en_pin.set_high();
         self.delay.delay_ms(35);
 
+        self.clear_error_status()?;
         self.single_measurement_set()?;
 
         loop
         {
             if let Ok(true) = self.n_rdy_pin.is_low()
-            {
+            {              
                break; 
             }
         }
+
         self.comm.write(self.address, &(Registers::ErrorStatus as u8).to_be_bytes())?;
         self.comm.read(self.address, &mut buf)?;
 
