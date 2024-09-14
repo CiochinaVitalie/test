@@ -4,38 +4,266 @@
 #![no_std]
 #![no_main]
 
+extern crate alloc;
 
-mod senseair;
+use alloc::boxed::Box;
+use alloc::rc::Rc;
+use alloc::vec;
 use core::cell::RefCell;
+use core::convert::Infallible;
+use cortex_m::interrupt::Mutex;
+use cortex_m::singleton;
+use core::fmt::Write;
+use embedded_alloc::LlffHeap as Heap;
+
 use core::time::Duration;
-use cortex_m::interrupt::{self, Mutex};
 use cortex_m::delay::Delay;
 
 use rp_pico::entry;
-use defmt::*;
+use defmt::{unimplemented,info};
 use defmt_rtt as _;
-use embedded_hal::digital::v2::OutputPin;
+use embedded_hal::digital::OutputPin;
+use embedded_hal::spi::{ErrorType, Operation, SpiBus, SpiDevice};
 use panic_probe as _;
+use embedded_dma;
+// use embedded_hal::blocking::i2c::{Read, Write};
+use rp_pico::hal::fugit::{RateExtU32,Hertz};
 
-use embedded_hal::blocking::i2c::{Read, Write};
+use renderer::Rgb565Pixel;
+use slint::platform::{software_renderer as renderer, PointerEventButton, WindowEvent};
+// use cortex_m::prelude::*;
+use display_interface_spi::SPIInterface;
+use mipidsi;
 
-use rp_pico::hal::fugit::RateExtU32;
-use bme680::*;
+use embedded_graphics::{
+    mono_font::{ascii::FONT_6X10, MonoTextStyle},
+    pixelcolor::Rgb565,
+    prelude::*,
+    text::Text,
+};
+
 
 use rp_pico::hal::{
     clocks::{init_clocks_and_plls, Clock},
     pac,
-    I2C,
-    pac::{I2C1,I2C0}, 
     sio::Sio,
     watchdog::Watchdog,
-    gpio::{FunctionI2C,FunctionI2c,Pin,OutputOverride,PinState,PullUp,PullDown,bank0::{Gpio16,Gpio17,Gpio18,Gpio19,Gpio20,Gpio21},FunctionSio,SioOutput,SioInput},
+    gpio::*,
+    spi::{Spi,Enabled},
+    timer::{Alarm,Alarm0},
+    dma::{DMAExt, SingleChannel, WriteTarget,single_buffer},
+    Timer
 };
-use senseair::Sunrise;
 
-const ADDRESS: u8 = 0x68;
 //static mut GLOBAL_DELAY:Option<cortex_m::delay::Delay> = None;
 static mut GLOBAL_DELAY: Option<Delay> = None;
+const HEAP_SIZE: usize = 200 * 1024;
+static mut HEAP: [u8; HEAP_SIZE] = [0; HEAP_SIZE];
+
+#[global_allocator]
+static ALLOCATOR: Heap = Heap::empty();
+const DISPLAY_SIZE: slint::PhysicalSize = slint::PhysicalSize::new(320, 240);
+const SPI_ILI9341_MAX_FREQ: Hertz<u32> = Hertz::<u32>::Hz(42_000_000);
+static ALARM0: Mutex<RefCell<Option<Alarm0>>> = Mutex::new(RefCell::new(None));
+static TIMER: Mutex<RefCell<Option<Timer>>> = Mutex::new(RefCell::new(None));
+
+pub type TargetPixel = Rgb565Pixel;
+
+type SpiPins = (
+    Pin<bank0::Gpio11,FunctionSpi,PullDown>,
+    Pin<bank0::Gpio12,FunctionSpi,PullDown>,
+    Pin<bank0::Gpio10,FunctionSpi,PullDown>,
+);
+
+type EnabledSpi = Spi<Enabled, pac::SPI1, SpiPins, 8>;
+type SpiRefCell = RefCell<(EnabledSpi, Hertz<u32>)>;
+type Display<DI, RST> = mipidsi::Display<DI, mipidsi::models::ILI9341Rgb565, RST>;
+
+#[derive(Clone)]
+struct SharedSpiWithFreq<CS> {
+    refcell: &'static SpiRefCell,
+    cs: CS,
+    freq: Hertz<u32>,
+}
+impl<CS> ErrorType for SharedSpiWithFreq<CS> {
+    type Error = <EnabledSpi as ErrorType>::Error;
+}
+
+
+impl<CS: OutputPin<Error = Infallible>> SpiDevice for SharedSpiWithFreq<CS> {
+    #[inline]
+    fn transaction(&mut self, operations: &mut [Operation<u8>]) -> Result<(), Self::Error> {
+        let mut borrowed = self.refcell.borrow_mut();
+        if borrowed.1 != self.freq {
+            borrowed.0.flush()?;
+            // the touchscreen and the LCD have different frequencies
+            borrowed.0.set_baudrate(125_000_000u32.Hz(), self.freq);
+            borrowed.1 = self.freq;
+        }
+        self.cs.set_low()?;
+        for op in operations {
+            match op {
+                Operation::Read(words) => borrowed.0.read(words),
+                Operation::Write(words) => borrowed.0.write(words),
+                Operation::Transfer(read, write) => borrowed.0.transfer(read, write),
+                Operation::TransferInPlace(words) => borrowed.0.transfer_in_place(words),
+                Operation::DelayNs(_) => unimplemented!(),
+            }?;
+        }
+        borrowed.0.flush()?;
+        drop(borrowed);
+        self.cs.set_high()?;
+        Ok(())
+    }
+}
+
+struct PartialReadBuffer(&'static mut [Rgb565Pixel], core::ops::Range<usize>);
+unsafe impl embedded_dma::ReadBuffer for PartialReadBuffer {
+    type Word = u8;
+
+    unsafe fn read_buffer(&self) -> (*const <Self as embedded_dma::ReadBuffer>::Word, usize) {
+        let act_slice = &self.0[self.1.clone()];
+        (act_slice.as_ptr() as *const u8, act_slice.len() * core::mem::size_of::<Rgb565Pixel>())
+    }
+}
+enum PioTransfer<TO: WriteTarget, CH: SingleChannel> {
+    Idle(CH, &'static mut [TargetPixel], TO),
+    Running(single_buffer::Transfer<CH, PartialReadBuffer, TO>),
+}
+
+impl<TO: WriteTarget<TransmittedWord = u8>, CH: SingleChannel> PioTransfer<TO, CH> {
+    fn wait(self) -> (CH, &'static mut [TargetPixel], TO) {
+        match self {
+            PioTransfer::Idle(a, b, c) => (a, b, c),
+            PioTransfer::Running(dma) => {
+                let (a, b, to) = dma.wait();
+                (a, b.0, to)
+            }
+        }
+    }
+}
+
+struct DrawBuffer<Display, PioTransfer, Stolen> {
+    display: Display,
+    buffer: &'static mut [TargetPixel],
+    pio: Option<PioTransfer>,
+    stolen_pin: Stolen,
+}
+
+impl<
+        DI: display_interface::WriteOnlyDataCommand,
+        RST: OutputPin<Error = Infallible>,
+        TO: WriteTarget<TransmittedWord = u8>,
+        CH: SingleChannel,
+        DC_: OutputPin<Error = Infallible>,
+        CS_: OutputPin<Error = Infallible>,
+    > renderer::LineBufferProvider
+    for &mut DrawBuffer<Display<DI, RST>, PioTransfer<TO, CH>, (DC_, CS_)>
+{
+    type TargetPixel = TargetPixel;
+
+    fn process_line(
+        &mut self,
+        line: usize,
+        range: core::ops::Range<usize>,
+        render_fn: impl FnOnce(&mut [TargetPixel]),
+    ) {
+        render_fn(&mut self.buffer[range.clone()]);
+
+        /* -- Send the pixel without DMA
+        self.display.set_pixels(
+            range.start as _,
+            line as _,
+            range.end as _,
+            line as _,
+            self.buffer[range.clone()]
+                .iter()
+                .map(|x| embedded_graphics::pixelcolor::raw::RawU16::new(x.0).into()),
+        );
+        return;*/
+
+        // convert from little to big endian before sending to the DMA channel
+        for x in &mut self.buffer[range.clone()] {
+            *x = Rgb565Pixel(x.0.to_be())
+        }
+        let (ch, mut b, spi) = self.pio.take().unwrap().wait();
+        core::mem::swap(&mut self.buffer, &mut b);
+
+        // We send empty data just to get the device in the right window
+        self.display
+            .set_pixels(
+                range.start as u16,
+                line as _,
+                range.end as u16,
+                line as u16,
+                core::iter::empty(),
+            )
+            .unwrap();
+
+        self.stolen_pin.1.set_low().unwrap();
+        self.stolen_pin.0.set_high().unwrap();
+        let mut dma = rp_pico::hal::dma::single_buffer::Config::new(ch, PartialReadBuffer(b, range), spi);
+        dma.pace(rp_pico::hal::dma::Pace::PreferSink);
+        self.pio = Some(PioTransfer::Running(dma.start()));
+        /*let (a, b, c) = dma.start().wait();
+        self.pio = Some(PioTransfer::Idle(a, b.0, c));*/
+    }
+}
+impl<
+        DI: display_interface::WriteOnlyDataCommand,
+        RST: OutputPin<Error = Infallible>,
+        TO: WriteTarget<TransmittedWord = u8> + embedded_hal_nb::spi::FullDuplex,
+        CH: SingleChannel,
+        DC_: OutputPin<Error = Infallible>,
+        CS_: OutputPin<Error = Infallible>,
+    > DrawBuffer<Display<DI, RST>, PioTransfer<TO, CH>, (DC_, CS_)>
+{
+    fn flush_frame(&mut self) {
+        let (ch, b, mut spi) = self.pio.take().unwrap().wait();
+        self.stolen_pin.1.set_high().unwrap();
+
+        // After the DMA operated, we need to empty the receive FIFO, otherwise the touch screen
+        // driver will pick wrong values.
+        // Continue to read as long as we don't get a Err(WouldBlock)
+        while !spi.read().is_err() {}
+
+        self.pio = Some(PioTransfer::Idle(ch, b, spi));
+    }
+}
+struct WriteToScreen<'a, D> {
+    x: i32,
+    y: i32,
+    width: i32,
+    style: MonoTextStyle<'a, Rgb565>,
+    display: &'a mut D,
+}
+
+impl<'a, D: DrawTarget<Color = Rgb565>> Write for WriteToScreen<'a, D> {
+    fn write_str(&mut self, mut s: &str) -> Result<(), core::fmt::Error> {
+        while !s.is_empty() {
+            let (x, y) = (self.x, self.y);
+            let end_of_line = s
+                .find(|c| {
+                    if c == '\n' || self.x > self.width {
+                        self.x = 0;
+                        self.y += 1;
+                        true
+                    } else {
+                        self.x += 1;
+                        false
+                    }
+                })
+                .unwrap_or(s.len());
+            let (line, rest) = s.split_at(end_of_line);
+            let sz = self.style.font.character_size;
+            Text::new(line, Point::new(x * sz.width as i32, y * sz.height as i32), self.style)
+                .draw(self.display)
+                .map_err(|_| core::fmt::Error)?;
+            s = rest.strip_prefix('\n').unwrap_or(rest);
+        }
+        Ok(())
+    }
+}
 
 #[entry]
 fn main() -> ! {
@@ -59,6 +287,10 @@ fn main() -> ! {
     .ok()
     .unwrap();
 
+    unsafe { ALLOCATOR.init(core::ptr::addr_of_mut!(HEAP) as usize, HEAP_SIZE) }
+
+    let mut timer = Timer::new(pac.TIMER, &mut pac.RESETS, &clocks);    
+
     //let mut delay = Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
     unsafe{
         GLOBAL_DELAY = Some(Delay::new(core.SYST, clocks.system_clock.freq().to_Hz()));
@@ -71,108 +303,76 @@ fn main() -> ! {
         sio.gpio_bank0,
         &mut pac.RESETS,
     );
+    let rst = pins.gpio15.into_push_pull_output();
+    let mut backlight = pins.gpio13.into_push_pull_output();
 
-        // Configure two pins as being I²C, not GPIO
-    let sda: Pin<_, FunctionI2C, _> = pins.gpio18.reconfigure();
-    let scl: Pin<_, FunctionI2C, _> = pins.gpio19.reconfigure();
+    let dc = pins.gpio8.into_push_pull_output();
+    let cs = pins.gpio9.into_push_pull_output();
 
-    let sda0: Pin<_, FunctionI2C, _> = pins.gpio16.reconfigure();
-    let scl0: Pin<_, FunctionI2C, _> = pins.gpio17.reconfigure();
-   
-
-    let i2c =  rp_pico::hal::I2C::i2c1(
-        pac.I2C1,
-        sda,
-        scl, // Try `not_an_scl_pin` here
-        100.kHz(),
+    let spi_sclk = pins.gpio10.into_function::<FunctionSpi>();
+    let spi_mosi = pins.gpio11.into_function::<FunctionSpi>();
+    let spi_miso = pins.gpio12.into_function::<FunctionSpi>();
+    let spi = Spi::<_, _, _, 8>::new(pac.SPI1, (spi_mosi, spi_miso, spi_sclk));
+    let spi = spi.init(
         &mut pac.RESETS,
-        &clocks.system_clock,
+        clocks.peripheral_clock.freq(),
+        SPI_ILI9341_MAX_FREQ,
+        &embedded_hal::spi::MODE_3,
     );
-    let i2c0 =  rp_pico::hal::I2C::i2c0(
-        pac.I2C0,
-        sda0,
-        scl0, // Try `not_an_scl_pin` here
-        100.kHz(),
-        &mut pac.RESETS,
-        &clocks.system_clock,
+
+    let (dc_copy, cs_copy) =
+        unsafe { (core::ptr::read(&dc as *const _), core::ptr::read(&cs as *const _)) };
+
+    let stolen_spi = unsafe { core::ptr::read(&spi as *const _) };
+    let spi = singleton!(:SpiRefCell = SpiRefCell::new((spi, 0.Hz()))).unwrap();
+    let display_spi = SharedSpiWithFreq { refcell: spi, cs, freq: SPI_ILI9341_MAX_FREQ };
+    let di = SPIInterface::new(display_spi, dc);
+
+    // let di = SPIInterface::new(display_spi, dc);
+
+    let mut display = mipidsi::Builder::new(mipidsi::models::ILI9341Rgb565, di)
+        .reset_pin(rst)
+        .display_size(DISPLAY_SIZE.height as _, DISPLAY_SIZE.width as _)
+        .orientation(mipidsi::options::Orientation::new().rotate(mipidsi::options::Rotation::Deg90))
+        .invert_colors(mipidsi::options::ColorInversion::Inverted)
+        .init(&mut timer)
+        .unwrap();
+
+    backlight.set_high().unwrap();
+
+    let mut alarm0 = timer.alarm_0().unwrap();
+    alarm0.enable_interrupt();
+
+
+    cortex_m::interrupt::free(|cs| {
+        ALARM0.borrow(cs).replace(Some(alarm0));
+        TIMER.borrow(cs).replace(Some(timer));
+    });
+
+    unsafe {
+        // pac::NVIC::unmask(pac::Interrupt::IO_IRQ_BANK0);
+        pac::NVIC::unmask(pac::Interrupt::TIMER_IRQ_0);
+    }
+
+    let dma = pac.DMA.split(&mut pac.RESETS);
+
+    let pio = PioTransfer::Idle(
+        dma.ch0,
+        vec![Rgb565Pixel::default(); DISPLAY_SIZE.width as _].leak(),
+        stolen_spi,
     );
-   
-    
-    let en_pin = pins.gpio20.into_push_pull_output_in_state(PinState::Low);
-    let nrdy_pin =pins.gpio21.into_pull_up_input();
 
-    //let mut  test:Option<Sunrise<rp_pico::hal::I2C<pac::I2C1, (Pin<rp_pico::hal::gpio::bank0::Gpio18, rp_pico::hal::gpio::FunctionI2c, rp_pico::hal::gpio::PullUp>, Pin<rp_pico::hal::gpio::bank0::Gpio19, rp_pico::hal::gpio::FunctionI2c, rp_pico::hal::gpio::PullUp>)>, cortex_m::delay::Delay, Pin<rp_pico::hal::gpio::bank0::Gpio20, rp_pico::hal::gpio::FunctionSio<rp_pico::hal::gpio::SioOutput>, rp_pico::hal::gpio::PullDown>, rp_pico::hal::gpio::AsInputPin<rp_pico::hal::gpio::bank0::Gpio21, rp_pico::hal::gpio::FunctionNull, rp_pico::hal::gpio::PullDown>> > = None;
-    let mut  test:Option<Sunrise<I2C<I2C1, (Pin<Gpio18, FunctionI2c, PullUp>, Pin<Gpio19, FunctionI2c, PullUp>)>, Delay, Pin<Gpio20, FunctionSio<SioOutput>, PullDown>, Pin<Gpio21, FunctionSio<SioInput>, PullUp>>> = None;
-    let mut test1:Option<Bme680<I2C<I2C0, (Pin<Gpio16, FunctionI2c, PullUp>, Pin<Gpio17, FunctionI2c, PullUp>)>, Delay>> = None;
-    unsafe {
-        if let Some(delay) = GLOBAL_DELAY.as_mut() {
-            test = Some(Sunrise::new(i2c, delay, en_pin, nrdy_pin));
-        }
-    }
-    unsafe {
-        if let Some(delay) = GLOBAL_DELAY.as_mut() {
-            test1 = Some( Bme680::init(i2c0, delay, I2CAddress::Secondary).unwrap());
-        }
-    }
-    let mut sensor_CO2 = test.take().unwrap();
-    let mut bme680 = test1.take().unwrap();
-    let settings = SettingsBuilder::new()
-    .with_humidity_oversampling(OversamplingSetting::OS2x)
-    .with_pressure_oversampling(OversamplingSetting::OS4x)
-    .with_temperature_oversampling(OversamplingSetting::OS8x)
-    .with_temperature_filter(IIRFilterSize::Size3)
-    .with_gas_measurement(Duration::from_millis(1500), 320, 25)
-    .with_temperature_offset(-2.2)
-    .with_run_gas(true)
-    .build();
-    let profile_dur = bme680.get_profile_dur(&settings.0).unwrap();
-    info!("Profile duration {:?}", profile_dur);
-    info!("Setting sensor settings");
+    let buffer_provider = DrawBuffer {
+        display,
+        buffer: vec![Rgb565Pixel::default(); DISPLAY_SIZE.width as _].leak(),
+        pio: Some(pio),
+        stolen_pin: (dc_copy, cs_copy),
+    };
 
-    unsafe {
-        if let Some(delay) = GLOBAL_DELAY.as_mut() {
-            bme680.set_sensor_settings(delay, settings).unwrap();
-        }
-    }
-    info!("Setting forced power modes");
-    unsafe {
-        if let Some(delay) = GLOBAL_DELAY.as_mut() {
-            bme680.set_sensor_mode(delay, PowerMode::ForcedMode).unwrap();
-        }
-    }
-    let sensor_settings = bme680.get_sensor_settings(settings.1);
-  
-    sensor_CO2.init(false,true,false).unwrap();
-
-    
-    
-    loop {
-
-    let data = sensor_CO2.single_measurement_get().unwrap();
-    
-    let sensor_data = ((data[6] as u16) << 8) | (data[7] as u16);
-    info!("Read CO2 data is {}",sensor_data);
-    unsafe {
-        if let Some(delay) = GLOBAL_DELAY.as_mut() {
-            bme680.set_sensor_mode(delay, PowerMode::ForcedMode).unwrap();
-        }
-    }
-    unsafe {
-        if let Some(delay) = GLOBAL_DELAY.as_mut() {
-            let (data, _state) = bme680.get_sensor_data(delay).unwrap();
-            info!("Temperature {}°C", data.temperature_celsius());
-            info!("Pressure {}hPa", data.pressure_hpa());
-            info!("Humidity {}%", data.humidity_percent());
-            info!("Gas Resistence {}Ω", data.gas_resistance_ohm());
-        }
-    }
-    
-    unsafe {
-        if let Some(delay) = GLOBAL_DELAY.as_mut() {
-            delay.delay_ms(15000);
-        }
-    }
-    }
+      
+    loop 
+    {}
 }
+
 
 
