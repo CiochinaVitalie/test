@@ -13,6 +13,9 @@ use core::cell::RefCell;
 use core::convert::Infallible;
 use cortex_m::interrupt::Mutex;
 use cortex_m::singleton;
+// use cortex_m_rt::interrupt;
+// use cortex_m::interrupt;
+
 use core::fmt::Write;
 use embedded_alloc::LlffHeap as Heap;
 
@@ -46,6 +49,7 @@ use embedded_graphics::{
 use rp_pico::hal::{
     clocks::{init_clocks_and_plls, Clock},
     pac,
+    pac::interrupt,
     sio::Sio,
     watchdog::Watchdog,
     gpio::*,
@@ -66,6 +70,9 @@ const DISPLAY_SIZE: slint::PhysicalSize = slint::PhysicalSize::new(320, 240);
 const SPI_ILI9341_MAX_FREQ: Hertz<u32> = Hertz::<u32>::Hz(42_000_000);
 static ALARM0: Mutex<RefCell<Option<Alarm0>>> = Mutex::new(RefCell::new(None));
 static TIMER: Mutex<RefCell<Option<Timer>>> = Mutex::new(RefCell::new(None));
+
+type IrqPin = Pin<bank0::Gpio17, FunctionSio<SioInput>, PullUp>;
+static IRQ_PIN: Mutex<RefCell<Option<IrqPin>>> = Mutex::new(RefCell::new(None));
 
 pub type TargetPixel = Rgb565Pixel;
 
@@ -306,6 +313,14 @@ fn main() -> ! {
     let rst = pins.gpio15.into_push_pull_output();
     let mut backlight = pins.gpio13.into_push_pull_output();
 
+    let mut touch_cs = pins.gpio16.into_push_pull_output();
+    touch_cs.set_high().unwrap();
+    let touch_irq = pins.gpio17.into_pull_up_input();
+    touch_irq.set_interrupt_enabled(Interrupt::LevelLow, true);
+    cortex_m::interrupt::free(|cs| {
+        IRQ_PIN.borrow(cs).replace(Some(touch_irq));
+    });
+
     let dc = pins.gpio8.into_push_pull_output();
     let cs = pins.gpio9.into_push_pull_output();
 
@@ -328,8 +343,6 @@ fn main() -> ! {
     let display_spi = SharedSpiWithFreq { refcell: spi, cs, freq: SPI_ILI9341_MAX_FREQ };
     let di = SPIInterface::new(display_spi, dc);
 
-    // let di = SPIInterface::new(display_spi, dc);
-
     let mut display = mipidsi::Builder::new(mipidsi::models::ILI9341Rgb565, di)
         .reset_pin(rst)
         .display_size(DISPLAY_SIZE.height as _, DISPLAY_SIZE.width as _)
@@ -339,6 +352,12 @@ fn main() -> ! {
         .unwrap();
 
     backlight.set_high().unwrap();
+
+    let touch = xpt2046::XPT2046::new(
+        &IRQ_PIN,
+        SharedSpiWithFreq { refcell: spi, cs: touch_cs, freq: xpt2046::SPI_FREQ },
+    )
+    .unwrap();
 
     let mut alarm0 = timer.alarm_0().unwrap();
     alarm0.enable_interrupt();
@@ -350,7 +369,7 @@ fn main() -> ! {
     });
 
     unsafe {
-        // pac::NVIC::unmask(pac::Interrupt::IO_IRQ_BANK0);
+        pac::NVIC::unmask(pac::Interrupt::IO_IRQ_BANK0);
         pac::NVIC::unmask(pac::Interrupt::TIMER_IRQ_0);
     }
 
@@ -369,10 +388,116 @@ fn main() -> ! {
         stolen_pin: (dc_copy, cs_copy),
     };
 
+    // slint::platform::set_platform(Box::new(PicoBackend {
+    //     window: Default::default(),
+    //     buffer_provider: buffer_provider.into(),
+    //     touch: touch.into(),
+    // }))
+    // .expect("backend already initialized");
       
     loop 
     {}
 }
 
+mod xpt2046 {
+    use core::cell::RefCell;
+    use cortex_m::interrupt::Mutex;
+    use embedded_hal::digital::InputPin;
+    use embedded_hal::spi::SpiDevice;
+    use euclid::default::Point2D;
+    use fugit::Hertz;
+
+    pub const SPI_FREQ: Hertz<u32> = Hertz::<u32>::Hz(3_000_000);
+
+    pub struct XPT2046<IRQ: InputPin + 'static, SPI: SpiDevice> {
+        irq: &'static Mutex<RefCell<Option<IRQ>>>,
+        spi: SPI,
+        pressed: bool,
+    }
+
+    impl<PinE, IRQ: InputPin<Error = PinE>, SPI: SpiDevice> XPT2046<IRQ, SPI> {
+        pub fn new(irq: &'static Mutex<RefCell<Option<IRQ>>>, spi: SPI) -> Result<Self, PinE> {
+            Ok(Self { irq, spi, pressed: false })
+        }
+
+        pub fn read(&mut self) -> Result<Option<Point2D<f32>>, Error<PinE, SPI::Error>> {
+            const PRESS_THRESHOLD: i32 = -25_000;
+            const RELEASE_THRESHOLD: i32 = -30_000;
+            let threshold = if self.pressed { RELEASE_THRESHOLD } else { PRESS_THRESHOLD };
+            self.pressed = false;
+
+            if cortex_m::interrupt::free(|cs| {
+                self.irq.borrow(cs).borrow_mut().as_mut().unwrap().is_low()
+            })
+            .map_err(|e| Error::Pin(e))?
+            {
+                const CMD_X_READ: u8 = 0b10010000;
+                const CMD_Y_READ: u8 = 0b11010000;
+                const CMD_Z1_READ: u8 = 0b10110000;
+                const CMD_Z2_READ: u8 = 0b11000000;
+
+                // These numbers were measured approximately.
+                const MIN_X: u32 = 1900;
+                const MAX_X: u32 = 30300;
+                const MIN_Y: u32 = 2300;
+                const MAX_Y: u32 = 30300;
+
+                macro_rules! xchg {
+                    ($byte:expr) => {{
+                        let mut b = [0, $byte, 0, 0];
+                        self.spi.transfer_in_place(&mut b).map_err(|e| Error::Transfer(e))?;
+                        let [_, _, h, l] = b;
+                        ((h as u32) << 8) | (l as u32)
+                    }};
+                }
+
+                let z1 = xchg!(CMD_Z1_READ);
+                let z2 = xchg!(CMD_Z2_READ);
+                let z = z1 as i32 - z2 as i32;
+
+                if z < threshold {
+                    return Ok(None);
+                }
+
+                let mut point = Point2D::new(0u32, 0u32);
+                for _ in 0..10 {
+                    let y = xchg!(CMD_Y_READ);
+                    let x = xchg!(CMD_X_READ);
+                    point += euclid::vec2(i16::MAX as u32 - x, y)
+                }
+                point /= 10;
+
+                let z1 = xchg!(CMD_Z1_READ);
+                let z2 = xchg!(CMD_Z2_READ);
+                let z = z1 as i32 - z2 as i32;
+
+                if z < RELEASE_THRESHOLD {
+                    return Ok(None);
+                }
+
+                self.pressed = true;
+                Ok(Some(euclid::point2(
+                    point.x.saturating_sub(MIN_X) as f32 / (MAX_X - MIN_X) as f32,
+                    point.y.saturating_sub(MIN_Y) as f32 / (MAX_Y - MIN_Y) as f32,
+                )))
+            } else {
+                Ok(None)
+            }
+        }
+    }
+
+    pub enum Error<PinE, TransferE> {
+        Pin(PinE),
+        Transfer(TransferE),
+    }
+}
 
 
+
+#[interrupt]
+
+fn TIMER_IRQ_0() {
+    cortex_m::interrupt::free(|cs| {
+        ALARM0.borrow(cs).borrow_mut().as_mut().unwrap().clear_interrupt();
+    });
+}
