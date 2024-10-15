@@ -88,13 +88,15 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         vec.extend_from_slice(&(Registers::StartMesurement as u8).to_be_bytes()).expect(EXPECT_MSG);
         vec.extend_from_slice(&(0x01 as u8).to_be_bytes()).expect(EXPECT_MSG);
         vec.extend_from_slice(&self.state_buf).expect(EXPECT_MSG);
-        self.comm.write(self.address, &vec)
+        self.comm.write(self.address, &vec)?;
+        Ok(())
     }
     fn clear_error_status(&mut self) -> Result<(), E> {
         let mut vec: Vec<u8, 2> = Vec::new();
         vec.extend_from_slice(&(Registers::ClearErrorStatus as u8).to_be_bytes()).expect(EXPECT_MSG);
         vec.extend_from_slice(&(0x00 as u8).to_be_bytes()).expect(EXPECT_MSG);
-        self.comm.write(self.address, &vec)
+        self.comm.write(self.address, &vec)?;
+        Ok(())
     }
     fn sensor_state_data_get(&mut self) -> Result<(), E> {
 
@@ -132,6 +134,47 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
             ctr_reg |  0x02
         };
 
+        vec.extend_from_slice(&(ctr_reg).to_be_bytes()).expect(EXPECT_MSG);
+        self.comm.write(self.address, &vec)?;
+
+        let _ = self.en_pin.set_low();
+        Ok(())
+    }
+
+    pub fn wake_up(&mut self) -> Result<(), E> {
+
+        let mut ctr_reg:u8 = 0xFF;
+        self.comm.write(self.address, &mut (ctr_reg).to_be_bytes())?;
+        self.comm.write(self.address, &(Registers::MeterControl as u8).to_be_bytes())?;
+        self.delay.delay_ms(10);
+        self.comm.read(self.address, &mut (ctr_reg).to_be_bytes())?;
+        Ok(())
+    }
+
+    pub fn enable_abc(&mut self)-> Result<(), E> {
+
+        let mut ctr_reg:u8 = 0xFF;
+        let mut vec: Vec<u8, 2> = Vec::new();
+        let _ = self.en_pin.set_high();
+        self.delay.delay_ms(35);
+        self.comm.write(self.address, &(Registers::MeterControl as u8).to_be_bytes())?;
+        self.comm.read(self.address, &mut (ctr_reg).to_be_bytes())?;
+        ctr_reg = ctr_reg & 0xFD;
+        vec.extend_from_slice(&(ctr_reg).to_be_bytes()).expect(EXPECT_MSG);
+        self.comm.write(self.address, &vec)?;
+
+        let _ = self.en_pin.set_low();
+        Ok(())
+    }
+    pub fn disable_abc(&mut self)-> Result<(), E> {
+
+        let mut ctr_reg:u8 = 0xFD;
+        let mut vec: Vec<u8, 2> = Vec::new();
+        let _ = self.en_pin.set_high();
+        self.delay.delay_ms(35);
+        self.comm.write(self.address, &(Registers::MeterControl as u8).to_be_bytes())?;
+        self.comm.read(self.address, &mut (ctr_reg).to_be_bytes())?;
+        ctr_reg = ctr_reg & 02;
         vec.extend_from_slice(&(ctr_reg).to_be_bytes()).expect(EXPECT_MSG);
         self.comm.write(self.address, &vec)?;
 

@@ -16,6 +16,7 @@ use defmt::*;
 use defmt_rtt as _;
 use embedded_hal::digital::v2::OutputPin;
 use panic_probe as _;
+use sx127x_lora;
 
 use embedded_hal::blocking::i2c::{Read, Write};
 
