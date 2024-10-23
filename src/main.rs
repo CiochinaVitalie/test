@@ -100,7 +100,7 @@ fn main() -> ! {
 
     let mut sensor_CO2 = test.take().unwrap();
 
-    sensor_CO2.init(false,true,false).unwrap();
+    let state = sensor_CO2.init(false,true,false);
 
     
     

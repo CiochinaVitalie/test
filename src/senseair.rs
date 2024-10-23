@@ -10,6 +10,21 @@ use heapless::Vec;
 const EXPECT_MSG: &str = "Vec was not large enough";
 const ADDRESS: u8 = 0x68;
 static mut STATE_DATA: [u8; 24] = [0x00;24];
+
+pub enum ErrorStatus{
+    LowInternalRegulatedVoltage,
+    MeasurementTimeout,
+    AbnormalSignalLevel,
+    ScaleFactorError,
+    FatalError,
+    I2cError,
+    AlgoritmError,
+    CalibrationError,
+    SelfDiagnosticsError,
+    OutOfRange,
+    MemoryError,
+    NoMeasurementCompleted,
+}
 pub enum  Registers{
     ErrorStatus             = 0x00,
     MeasuredFilteredPc      = 0x06,
@@ -83,12 +98,32 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         Ok(u16::from_be_bytes(buf))
     }
 
+    pub fn wake_up(&mut self) -> Result<(), E> {
+
+        for num in 0..5{
+
+            if let Ok(()) = self.comm.write(self.address, &(0x00 as u8).to_be_bytes()){
+                   break ;
+            }
+        }
+        
+        Ok(())
+    }
+
     fn single_measurement_set(&mut self) -> Result<(), E> {
+
         let mut vec: Vec<u8, 26> = Vec::new();
+
+        vec.extend_from_slice(&(Registers::MeasurementMode as u8).to_be_bytes()).expect(EXPECT_MSG);
+        vec.extend_from_slice(&(0x01 as u8).to_be_bytes()).expect(EXPECT_MSG);
+        self.comm.write(self.address, &vec)?;
+        vec.clear();
+
         vec.extend_from_slice(&(Registers::StartMesurement as u8).to_be_bytes()).expect(EXPECT_MSG);
         vec.extend_from_slice(&(0x01 as u8).to_be_bytes()).expect(EXPECT_MSG);
         vec.extend_from_slice(&self.state_buf).expect(EXPECT_MSG);
         self.comm.write(self.address, &vec)?;
+
         Ok(())
     }
     fn clear_error_status(&mut self) -> Result<(), E> {
@@ -141,16 +176,6 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         Ok(())
     }
 
-    pub fn wake_up(&mut self) -> Result<(), E> {
-
-        let mut ctr_reg:u8 = 0xFF;
-        self.comm.write(self.address, &mut (ctr_reg).to_be_bytes())?;
-        self.comm.write(self.address, &(Registers::MeterControl as u8).to_be_bytes())?;
-        self.delay.delay_ms(10);
-        self.comm.read(self.address, &mut (ctr_reg).to_be_bytes())?;
-        Ok(())
-    }
-
     pub fn enable_abc(&mut self)-> Result<(), E> {
 
         let mut ctr_reg:u8 = 0xFF;
@@ -188,6 +213,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         let _ = self.en_pin.set_high();
         self.delay.delay_ms(35);
 
+        
         self.clear_error_status()?;
         self.single_measurement_set()?;
 
