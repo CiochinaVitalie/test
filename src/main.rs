@@ -94,22 +94,22 @@ fn main() -> ! {
 
     unsafe {
         if let Some(delay) = GLOBAL_DELAY.as_mut() {
-            test = Some(Sunrise::new(i2c, delay, en_pin, nrdy_pin));
+            test = Some(Sunrise::new(i2c, delay, Some(en_pin), nrdy_pin));
         }
     }
 
     let mut sensor_CO2 = test.take().unwrap();
 
-    let state = sensor_CO2.init(false,true,false);
+    let state = sensor_CO2.init(false,true,false,false);
 
     
     
     loop {
 
-    let data = sensor_CO2.single_measurement_get().unwrap();
+    // let data = sensor_CO2.single_measurement_get().unwrap();
     
-    let sensor_data = ((data[6] as u16) << 8) | (data[7] as u16);
-    info!("Read CO2 data is {}",sensor_data);
+    // let sensor_data = ((data[6] as u16) << 8) | (data[7] as u16);
+    // info!("Read CO2 data is {}",sensor_data);
     
     unsafe {
         if let Some(delay) = GLOBAL_DELAY.as_mut() {

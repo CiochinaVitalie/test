@@ -58,15 +58,19 @@ pub struct Measurement {
 pub struct Sunrise<'a,T,D,EN,NRDY> {
     comm: T,
     delay: &'a mut D,
-    en_pin:EN,
+    en_pin:Option<EN>,
     n_rdy_pin:NRDY,
     address: u8,
     state_buf:[u8;24]
 }
 
+pub  struct My<T> {
+    gh:Option<T>
+}
+
 impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Write<Error = E>, D:DelayMs<u32> + 'a,EN:OutputPin,NRDY:InputPin {
     
-    pub fn new_with_address(i2c: T, address: u8,delay:&'a mut D,en_pin:EN,nrdy_pin:NRDY) -> Self {
+    pub fn new_with_address(i2c: T, address: u8,delay:&'a mut D,en_pin:Option<EN>,nrdy_pin:NRDY) -> Self {
         Sunrise {
             comm: i2c,
             delay:delay,
@@ -77,7 +81,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         }
     }
 
-    pub fn new(i2c: T, delay:&'a mut D,en_pin:EN,nrdy_pin:NRDY) -> Self {
+    pub fn new(i2c: T, delay:&'a mut D,en_pin:Option<EN>,nrdy_pin:NRDY) -> Self {
         Sunrise {
             comm: i2c,
             delay:delay,
@@ -90,34 +94,24 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
 
     pub fn fimware_get(&mut self) -> Result<u16, E> {
         let mut buf = [0u8; 2];
-        let _ = self.en_pin.set_high();
+
+        if let Some(ref mut en_pin) = self.en_pin {
+            en_pin.set_high().ok(); 
+        }
+    
         self.delay.delay_ms(35);
         self.comm.write(self.address, &(Registers::FirmwareVer as u8).to_be_bytes())?;
         self.comm.read(self.address, &mut buf)?;
-        let _ = self.en_pin.set_low();
+
+        if let Some(ref mut en_pin) = self.en_pin {
+            en_pin.set_low().ok();
+        }
         Ok(u16::from_be_bytes(buf))
     }
 
-    pub fn wake_up(&mut self) -> Result<(), E> {
-
-        for num in 0..5{
-
-            if let Ok(()) = self.comm.write(self.address, &(0x00 as u8).to_be_bytes()){
-                   break ;
-            }
-        }
-        
-        Ok(())
-    }
-
-    fn single_measurement_set(&mut self) -> Result<(), E> {
+    fn sensor_state_data_set(&mut self) -> Result<(), E> {
 
         let mut vec: Vec<u8, 26> = Vec::new();
-
-        vec.extend_from_slice(&(Registers::MeasurementMode as u8).to_be_bytes()).expect(EXPECT_MSG);
-        vec.extend_from_slice(&(0x01 as u8).to_be_bytes()).expect(EXPECT_MSG);
-        self.comm.write(self.address, &vec)?;
-        vec.clear();
 
         vec.extend_from_slice(&(Registers::StartMesurement as u8).to_be_bytes()).expect(EXPECT_MSG);
         vec.extend_from_slice(&(0x01 as u8).to_be_bytes()).expect(EXPECT_MSG);
@@ -139,11 +133,15 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         self.comm.read(self.address, &mut self.state_buf)
     }
 
-    pub fn init (&mut self,press_comp:bool, iir_filter:bool, abc:bool) -> Result<(), E> {
+    pub fn init (&mut self,press_comp:bool, iir_filter:bool, abc:bool, continuous_mode:bool) -> Result<(), E> {
 
         let mut ctr_reg:u8 = 0;
         let mut vec: Vec<u8, 2> = Vec::new();
-        let _ = self.en_pin.set_high();
+
+        if let Some(ref mut en_pin) = self.en_pin {
+            en_pin.set_high().ok(); 
+        }
+
         self.delay.delay_ms(35);
         self.sensor_state_data_get()?;
 
@@ -171,8 +169,25 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
 
         vec.extend_from_slice(&(ctr_reg).to_be_bytes()).expect(EXPECT_MSG);
         self.comm.write(self.address, &vec)?;
+        vec.clear();
 
-        let _ = self.en_pin.set_low();
+        vec.extend_from_slice(&(Registers::MeasurementMode as u8).to_be_bytes()).expect(EXPECT_MSG);
+
+        if continuous_mode{           
+            vec.extend_from_slice(&(0x00 as u8).to_be_bytes()).expect(EXPECT_MSG);
+            
+        }
+        else {
+            vec.extend_from_slice(&(0x01 as u8).to_be_bytes()).expect(EXPECT_MSG);
+        }
+
+        self.comm.write(self.address, &vec)?;
+
+        self.sensor_state_data_get()?;
+
+        if let Some(ref mut en_pin) = self.en_pin {
+            en_pin.set_low().ok(); 
+        }
         Ok(())
     }
 
@@ -180,7 +195,11 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
 
         let mut ctr_reg:u8 = 0xFF;
         let mut vec: Vec<u8, 2> = Vec::new();
-        let _ = self.en_pin.set_high();
+
+        if let Some(ref mut en_pin) = self.en_pin {
+            en_pin.set_high().ok(); 
+        }
+
         self.delay.delay_ms(35);
         self.comm.write(self.address, &(Registers::MeterControl as u8).to_be_bytes())?;
         self.comm.read(self.address, &mut (ctr_reg).to_be_bytes())?;
@@ -188,14 +207,18 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         vec.extend_from_slice(&(ctr_reg).to_be_bytes()).expect(EXPECT_MSG);
         self.comm.write(self.address, &vec)?;
 
-        let _ = self.en_pin.set_low();
+        if let Some(ref mut en_pin) = self.en_pin {
+            en_pin.set_low().ok(); 
+        }
         Ok(())
     }
     pub fn disable_abc(&mut self)-> Result<(), E> {
 
         let mut ctr_reg:u8 = 0xFD;
         let mut vec: Vec<u8, 2> = Vec::new();
-        let _ = self.en_pin.set_high();
+        if let Some(ref mut en_pin) = self.en_pin {
+            en_pin.set_high().ok(); 
+        }
         self.delay.delay_ms(35);
         self.comm.write(self.address, &(Registers::MeterControl as u8).to_be_bytes())?;
         self.comm.read(self.address, &mut (ctr_reg).to_be_bytes())?;
@@ -203,19 +226,23 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         vec.extend_from_slice(&(ctr_reg).to_be_bytes()).expect(EXPECT_MSG);
         self.comm.write(self.address, &vec)?;
 
-        let _ = self.en_pin.set_low();
+        if let Some(ref mut en_pin) = self.en_pin {
+            en_pin.set_low().ok(); 
+        }
         Ok(())
     }
 
-    pub fn single_measurement_get(&mut self) -> Result<[u8; 8], E> {
+    pub fn CO2_measurement_get(&mut self) -> Result<[u8; 8], E> {
         let mut vec: Vec<u8, 2> = Vec::new();
         let mut buf = [0u8; 8];
-        let _ = self.en_pin.set_high();
+        if let Some(ref mut en_pin) = self.en_pin {
+            en_pin.set_high().ok(); 
+        }
         self.delay.delay_ms(35);
 
         
         self.clear_error_status()?;
-        self.single_measurement_set()?;
+        self.sensor_state_data_set()?;
 
         loop
         {
@@ -231,7 +258,9 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         self.sensor_state_data_get()?;
 
 
-        let _ = self.en_pin.set_low();
+        if let Some(ref mut en_pin) = self.en_pin {
+            en_pin.set_low().ok(); 
+        }
         Ok(buf)
      
         
