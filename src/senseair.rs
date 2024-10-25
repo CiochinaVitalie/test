@@ -9,22 +9,8 @@ use heapless::Vec;
 
 const EXPECT_MSG: &str = "Vec was not large enough";
 const ADDRESS: u8 = 0x68;
-static mut STATE_DATA: [u8; 24] = [0x00;24];
 
-pub enum ErrorStatus{
-    LowInternalRegulatedVoltage,
-    MeasurementTimeout,
-    AbnormalSignalLevel,
-    ScaleFactorError,
-    FatalError,
-    I2cError,
-    AlgoritmError,
-    CalibrationError,
-    SelfDiagnosticsError,
-    OutOfRange,
-    MemoryError,
-    NoMeasurementCompleted,
-}
+
 pub enum  Registers{
     ErrorStatus             = 0x00,
     MeasuredFilteredPc      = 0x06,
@@ -48,6 +34,22 @@ pub enum  Registers{
     ClearErrorStatus        = 0x9D
 }
 
+// #[derive(Debug)]
+pub enum ErrorStatus <E>{
+    I2c(E), 
+    LowInternalRegulatedVoltage,
+    MeasurementTimeout,
+    AbnormalSignalLevel,
+    ScaleFactorError,
+    FatalError,
+    I2cError,
+    AlgoritmError,
+    CalibrationError,
+    SelfDiagnosticsError,
+    OutOfRange,
+    MemoryError,
+    NoMeasurementCompleted,
+}
 /////////////////////////////////////////////////////////////////
 #[derive(Debug)]
 pub struct Measurement {
@@ -64,9 +66,6 @@ pub struct Sunrise<'a,T,D,EN,NRDY> {
     state_buf:[u8;24]
 }
 
-pub  struct My<T> {
-    gh:Option<T>
-}
 
 impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Write<Error = E>, D:DelayMs<u32> + 'a,EN:OutputPin,NRDY:InputPin {
     
@@ -96,10 +95,10 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         let mut buf = [0u8; 2];
 
         if let Some(ref mut en_pin) = self.en_pin {
-            en_pin.set_high().ok(); 
+            en_pin.set_high().ok();
+            self.delay.delay_ms(35);
         }
-    
-        self.delay.delay_ms(35);
+           
         self.comm.write(self.address, &(Registers::FirmwareVer as u8).to_be_bytes())?;
         self.comm.read(self.address, &mut buf)?;
 
@@ -107,6 +106,38 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
             en_pin.set_low().ok();
         }
         Ok(u16::from_be_bytes(buf))
+    }
+
+    fn check_sensor_error(&mut self,sensor_err: u16) -> Option<ErrorStatus<E>> {
+        if sensor_err & (1 << 16) != 0 {
+            Some(ErrorStatus::LowInternalRegulatedVoltage)
+        } else if sensor_err & (1 << 15) != 0 {
+            Some(ErrorStatus::MeasurementTimeout)
+        } else if sensor_err & (1 << 14) != 0 {
+            Some(ErrorStatus::AbnormalSignalLevel)
+        } else if sensor_err & (1 << 8) != 0 {
+            Some(ErrorStatus::ScaleFactorError)
+        } else if sensor_err & (1 << 7) != 0 {
+            Some(ErrorStatus::FatalError)
+        } else if sensor_err & (1 << 6) != 0 {
+            Some(ErrorStatus::I2cError)
+        } else if sensor_err & (1 << 5) != 0 {
+            Some(ErrorStatus::AlgoritmError)
+        } else if sensor_err & (1 << 4) != 0 {
+            Some(ErrorStatus::CalibrationError)
+        } else if sensor_err & (1 << 3) != 0 {
+            Some(ErrorStatus::SelfDiagnosticsError)
+        } else if sensor_err & (1 << 2) != 0 {
+            Some(ErrorStatus::OutOfRange)
+        } else if sensor_err & (1 << 1) != 0 {
+            Some(ErrorStatus::MemoryError)
+        } else if sensor_err & (1 << 0) != 0 {
+            Some(ErrorStatus::NoMeasurementCompleted)
+        } 
+        
+        else {
+            None
+        }
     }
 
     fn sensor_state_data_set(&mut self) -> Result<(), E> {
@@ -139,10 +170,11 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         let mut vec: Vec<u8, 2> = Vec::new();
 
         if let Some(ref mut en_pin) = self.en_pin {
-            en_pin.set_high().ok(); 
+            en_pin.set_high().ok();
+            self.delay.delay_ms(35);
         }
 
-        self.delay.delay_ms(35);
+        
         self.sensor_state_data_get()?;
 
         self.comm.write(self.address, &(Registers::MeterControl as u8).to_be_bytes())?;
@@ -197,10 +229,10 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         let mut vec: Vec<u8, 2> = Vec::new();
 
         if let Some(ref mut en_pin) = self.en_pin {
-            en_pin.set_high().ok(); 
+            en_pin.set_high().ok();
+            self.delay.delay_ms(35);
         }
-
-        self.delay.delay_ms(35);
+        
         self.comm.write(self.address, &(Registers::MeterControl as u8).to_be_bytes())?;
         self.comm.read(self.address, &mut (ctr_reg).to_be_bytes())?;
         ctr_reg = ctr_reg & 0xFD;
@@ -217,9 +249,9 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         let mut ctr_reg:u8 = 0xFD;
         let mut vec: Vec<u8, 2> = Vec::new();
         if let Some(ref mut en_pin) = self.en_pin {
-            en_pin.set_high().ok(); 
-        }
-        self.delay.delay_ms(35);
+            en_pin.set_high().ok();
+            self.delay.delay_ms(35);
+        }       
         self.comm.write(self.address, &(Registers::MeterControl as u8).to_be_bytes())?;
         self.comm.read(self.address, &mut (ctr_reg).to_be_bytes())?;
         ctr_reg = ctr_reg & 02;
@@ -232,17 +264,16 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         Ok(())
     }
 
-    pub fn CO2_measurement_get(&mut self) -> Result<[u8; 8], E> {
+    pub fn CO2_measurement_get(&mut self) -> Result<[u8; 8], ErrorStatus<E>> {
         let mut vec: Vec<u8, 2> = Vec::new();
         let mut buf = [0u8; 8];
         if let Some(ref mut en_pin) = self.en_pin {
-            en_pin.set_high().ok(); 
+            en_pin.set_high().ok();
+            self.delay.delay_ms(35);
         }
-        self.delay.delay_ms(35);
-
         
-        self.clear_error_status()?;
-        self.sensor_state_data_set()?;
+        self.clear_error_status().map_err(ErrorStatus::I2c)?;
+        self.sensor_state_data_set().map_err(ErrorStatus::I2c)?;
 
         loop
         {
@@ -252,15 +283,23 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
             }
         }
 
-        self.comm.write(self.address, &(Registers::ErrorStatus as u8).to_be_bytes())?;
-        self.comm.read(self.address, &mut buf)?;
+        self.comm.write(self.address, &(Registers::ErrorStatus as u8).to_be_bytes()).map_err(ErrorStatus::I2c)?;
+        self.comm.read(self.address, &mut buf).map_err(ErrorStatus::I2c)?;
 
-        self.sensor_state_data_get()?;
+        self.sensor_state_data_get().map_err(ErrorStatus::I2c)?;
 
 
         if let Some(ref mut en_pin) = self.en_pin {
             en_pin.set_low().ok(); 
         }
+
+        let sensor_err = ((buf[0] as u16) << 8) | (buf[1] as u16);
+
+        if let Some(err) = self.check_sensor_error(sensor_err) {
+            return Err(err);
+        }
+ 
+
         Ok(buf)
      
         
