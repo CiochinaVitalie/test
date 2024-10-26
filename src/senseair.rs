@@ -51,12 +51,23 @@ pub enum ErrorStatus <E>{
     NoMeasurementCompleted,
 }
 /////////////////////////////////////////////////////////////////
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Measurement {
     pub co2:         u16,
     pub temperature: u16,
 }
 
+impl Measurement {
+    fn from_bytes(buf: &[u8; 10]) -> Self {
+        let co2 = (u16::from(buf[6]) << 8) | u16::from(buf[7]);
+        let temperature = (u16::from(buf[8]) << 8) | u16::from(buf[9]);
+        Self {
+            co2,
+            temperature,
+        }
+    }
+}
+/////////////////////////////////////////////////////////////////
 pub struct Sunrise<'a,T,D,EN,NRDY> {
     comm: T,
     delay: &'a mut D,
@@ -264,9 +275,9 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         Ok(())
     }
 
-    pub fn CO2_measurement_get(&mut self) -> Result<[u8; 8], ErrorStatus<E>> {
+    pub fn CO2_measurement_get(&mut self) -> Result<Measurement, ErrorStatus<E>> {
         let mut vec: Vec<u8, 2> = Vec::new();
-        let mut buf = [0u8; 8];
+        let mut buf = [0u8; 10];
         if let Some(ref mut en_pin) = self.en_pin {
             en_pin.set_high().ok();
             self.delay.delay_ms(35);
@@ -300,7 +311,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         }
  
 
-        Ok(buf)
+        Ok(Measurement::from_bytes(&buf))
      
         
     }
