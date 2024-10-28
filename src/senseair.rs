@@ -51,6 +51,51 @@ pub enum ErrorStatus <E>{
     NoMeasurementCompleted,
 }
 /////////////////////////////////////////////////////////////////
+#[derive(Debug)]
+pub struct Config {
+    pub SingleMeasurementMode: u8,
+    pub MeasurementPeriod: u16,
+    pub NumberOfSamples: u16,
+    pub ABCPeriod: u16,
+    pub ABCTarget:u16,
+    pub IIRFilter:u8,
+    pub MeterControl:u8,
+    pub I2CAddres:u8,
+    pub Nominator:u16,
+    pub Denominator:u16,
+    pub ScaledABCTarget:u16
+
+}
+impl Config {
+    fn from_bytes(buf: &[u8; 25]) -> Self {
+        let SingleMeasurementMode = u8::from(buf[0]);
+        let MeasurementPeriod = (u16::from(buf[1]) << 8) | u16::from(buf[2]);
+        let NumberOfSamples = (u16::from(buf[3]) << 8) | u16::from(buf[4]);
+        let ABCPeriod = (u16::from(buf[5]) << 8) | u16::from(buf[6]);
+        let ABCTarget = (u16::from(buf[8]) << 8) | u16::from(buf[9]);
+        let IIRFilter = u8::from(buf[11]);
+        let MeterControl = u8::from(buf[15]);
+        let I2CAddres = u8::from(buf[18]);
+        let Nominator = (u16::from(buf[19]) << 8) | u16::from(buf[20]);
+        let Denominator = (u16::from(buf[21]) << 8) | u16::from(buf[22]);
+        let ScaledABCTarget = (u16::from(buf[23]) << 8) | u16::from(buf[24]);
+
+        Self {
+            SingleMeasurementMode,
+            MeasurementPeriod,
+            NumberOfSamples,
+            ABCPeriod,
+            ABCTarget,
+            IIRFilter,
+            MeterControl,
+            I2CAddres,
+            Nominator,
+            Denominator,
+            ScaledABCTarget
+        }
+    }
+}
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct Measurement {
     pub co2:         u16,
@@ -74,7 +119,7 @@ pub struct Sunrise<'a,T,D,EN,NRDY> {
     en_pin:Option<EN>,
     n_rdy_pin:NRDY,
     address: u8,
-    state_buf:[u8;24]
+    state_buf:[u8;24],
 }
 
 
@@ -87,7 +132,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
             en_pin:en_pin,
             n_rdy_pin:nrdy_pin,
             address,
-            state_buf:[0x00;24]
+            state_buf:[0x00;24],
         }
     }
 
@@ -98,8 +143,19 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
             en_pin:en_pin,
             n_rdy_pin:nrdy_pin,
             address: ADDRESS,
-            state_buf:[0x00;24]
+            state_buf:[0x00;24],
         }
+    }
+
+    pub fn get_default_config(&mut self)-> Result<Config, E> {
+        let mut buf = [0u8; 25];
+
+        self.comm.write(self.address, &(Registers::MeasurementMode as u8).to_be_bytes())?;
+        self.comm.read(self.address, &mut buf)?;
+
+    
+        Ok(Config::from_bytes(&buf))
+
     }
 
     pub fn fimware_get(&mut self) -> Result<u16, E> {
@@ -144,8 +200,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
             Some(ErrorStatus::MemoryError)
         } else if sensor_err & (1 << 0) != 0 {
             Some(ErrorStatus::NoMeasurementCompleted)
-        } 
-        
+        }        
         else {
             None
         }
@@ -175,6 +230,10 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         self.comm.read(self.address, &mut self.state_buf)
     }
 
+    fn is_equal<F: PartialEq>(a: F, b: F) -> bool {
+        a == b
+    }
+
     pub fn init (&mut self,press_comp:bool, iir_filter:bool, abc:bool, continuous_mode:bool) -> Result<(), E> {
 
         let mut ctr_reg:u8 = 0;
@@ -187,6 +246,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
 
         
         self.sensor_state_data_get()?;
+
 
         self.comm.write(self.address, &(Registers::MeterControl as u8).to_be_bytes())?;
         self.comm.read(self.address, &mut (ctr_reg).to_be_bytes())?;
