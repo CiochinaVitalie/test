@@ -26,9 +26,17 @@ pub enum  Registers{
     ProductCode             = 0x70,
     CalibrationStatus       = 0x81,
     CalibrationCommand      = 0x82,
+    MeasurementMode_EE      = 0x95,
     MeasurementPeriod_EE    = 0x96,
-    MeasurementMode         = 0x95,
-    MeterControl            = 0xA5,
+    NumberOfSamples_EE      = 0x98,
+    ABC_Period_EE           = 0x9A,
+    ABC_Target_EE           = 0x9E,
+    StaticIIRFilter_EE      = 0xA1,
+    MeterControl_EE         = 0xA5,
+    I2C_Address_EE          = 0xA7,
+    Nominator_EE            = 0xA8,
+    Denominator_EE          = 0xAA,
+    Scale_ABC_Target        = 0xB0,
     StartMesurement         = 0xC3,
     AbcTime                 = 0xC4,
     ClearErrorStatus        = 0x9D
@@ -153,7 +161,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
     pub fn get_default_config(&mut self)-> Result<Config, E> {
         let mut buf = [0u8; 25];
 
-        self.comm.write(self.address, &(Registers::MeasurementMode as u8).to_be_bytes())?;
+        self.comm.write(self.address, &(Registers::MeasurementMode_EE as u8).to_be_bytes())?;
         self.comm.read(self.address, &mut buf)?;
 
         let read_config = Config::from_bytes(&buf);
@@ -222,6 +230,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
 
         Ok(())
     }
+
     fn clear_error_status(&mut self) -> Result<(), E> {
         let mut vec: Vec<u8, 2> = Vec::new();
         vec.extend_from_slice(&(Registers::ClearErrorStatus as u8).to_be_bytes()).expect(EXPECT_MSG);
@@ -229,6 +238,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         self.comm.write(self.address, &vec)?;
         Ok(())
     }
+
     fn sensor_state_data_get(&mut self) -> Result<(), E> {
 
         self.comm.write(self.address, &(Registers::AbcTime as u8).to_be_bytes())?;
@@ -239,22 +249,39 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         a == b
     }
 
+    fn en_pin_set(&mut self){
+
+        if let Some(ref mut en_pin) = self.en_pin {
+            en_pin.set_high().ok();
+        }
+    }
+
+    fn en_pin_reset(&mut self){
+
+        if let Some(ref mut en_pin) = self.en_pin {
+            en_pin.set_low().ok(); 
+        }
+    }
+
+    fn check_config_before_write(&mut self) -> Result<(), E> {
+
+
+     Ok(())
+    }
+
     pub fn init (&mut self,config:Config) -> Result<(), E> {
 
         let mut ctr_reg:u8 = 0;
         let mut vec: Vec<u8, 2> = Vec::new();
 
-        if let Some(ref mut en_pin) = self.en_pin {
-            en_pin.set_high().ok();
-            self.delay.delay_ms(35);
-        }
-
+        self.en_pin_set();
+        self.delay.delay_ms(35);
         
         self.sensor_state_data_get()?;
 
         if let false = self.is_equal(config.SingleMeasurementMode,self.config.SingleMeasurementMode)
         {
-            vec.extend_from_slice(&(Registers::MeterControl as u8).to_be_bytes()).expect(EXPECT_MSG);
+            vec.extend_from_slice(&(Registers::MeterControl_EE as u8).to_be_bytes()).expect(EXPECT_MSG);
             vec.extend_from_slice(&(config.SingleMeasurementMode as u8).to_be_bytes()).expect(EXPECT_MSG);
             self.comm.write(self.address, &vec)?;
             vec.clear();
@@ -266,10 +293,71 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
             self.comm.write(self.address, &vec)?;
             vec.clear();
         }
-
-        if let Some(ref mut en_pin) = self.en_pin {
-            en_pin.set_low().ok(); 
+        if let false = self.is_equal(config.ABCPeriod,self.config.ABCPeriod)
+        {
+            vec.extend_from_slice(&(Registers::ABC_Period_EE as u8).to_be_bytes()).expect(EXPECT_MSG);
+            vec.extend_from_slice(&(config.ABCPeriod as u16).to_be_bytes()).expect(EXPECT_MSG);
+            self.comm.write(self.address, &vec)?;
+            vec.clear();
         }
+        if let false = self.is_equal(config.ABCTarget,self.config.ABCTarget)
+        {
+            vec.extend_from_slice(&(Registers::ABC_Target_EE as u8).to_be_bytes()).expect(EXPECT_MSG);
+            vec.extend_from_slice(&(config.ABCTarget as u16).to_be_bytes()).expect(EXPECT_MSG);
+            self.comm.write(self.address, &vec)?;
+            vec.clear();
+        }
+
+        if let false = self.is_equal(config.Denominator,self.config.Denominator)
+        {
+            vec.extend_from_slice(&(Registers::Denominator_EE as u8).to_be_bytes()).expect(EXPECT_MSG);
+            vec.extend_from_slice(&(config.Denominator as u16).to_be_bytes()).expect(EXPECT_MSG);
+            self.comm.write(self.address, &vec)?;
+            vec.clear();
+        }
+
+        if let false = self.is_equal(config.Nominator,self.config.Nominator)
+        {
+            vec.extend_from_slice(&(Registers::Nominator_EE as u8).to_be_bytes()).expect(EXPECT_MSG);
+            vec.extend_from_slice(&(config.Nominator as u16).to_be_bytes()).expect(EXPECT_MSG);
+            self.comm.write(self.address, &vec)?;
+            vec.clear();
+        }
+
+        if let false = self.is_equal(config.NumberOfSamples,self.config.NumberOfSamples)
+        {
+            vec.extend_from_slice(&(Registers::NumberOfSamples_EE as u8).to_be_bytes()).expect(EXPECT_MSG);
+            vec.extend_from_slice(&(config.NumberOfSamples as u16).to_be_bytes()).expect(EXPECT_MSG);
+            self.comm.write(self.address, &vec)?;
+            vec.clear();
+        }
+
+        if let false = self.is_equal(config.ScaledABCTarget,self.config.ScaledABCTarget)
+        {
+            vec.extend_from_slice(&(Registers::Scale_ABC_Target as u8).to_be_bytes()).expect(EXPECT_MSG);
+            vec.extend_from_slice(&(config.ScaledABCTarget as u16).to_be_bytes()).expect(EXPECT_MSG);
+            self.comm.write(self.address, &vec)?;
+            vec.clear();
+        }
+
+        if let false = self.is_equal(config.I2CAddres,self.config.I2CAddres)
+        {
+            vec.extend_from_slice(&(Registers::I2C_Address_EE as u8).to_be_bytes()).expect(EXPECT_MSG);
+            vec.extend_from_slice(&(config.I2CAddres as u16).to_be_bytes()).expect(EXPECT_MSG);
+            self.comm.write(self.address, &vec)?;
+            vec.clear();
+        }
+
+        if let false = self.is_equal(config.IIRFilter,self.config.IIRFilter)
+        {
+            vec.extend_from_slice(&(Registers::StaticIIRFilter_EE as u8).to_be_bytes()).expect(EXPECT_MSG);
+            vec.extend_from_slice(&(config.IIRFilter as u16).to_be_bytes()).expect(EXPECT_MSG);
+            self.comm.write(self.address, &vec)?;
+            vec.clear();
+        }
+
+        self.en_pin_reset();
+
         Ok(())
     }
 
@@ -283,7 +371,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
             self.delay.delay_ms(35);
         }
         
-        self.comm.write(self.address, &(Registers::MeterControl as u8).to_be_bytes())?;
+        self.comm.write(self.address, &(Registers::MeterControl_EE as u8).to_be_bytes())?;
         self.comm.read(self.address, &mut (ctr_reg).to_be_bytes())?;
         ctr_reg = ctr_reg & 0xFD;
         vec.extend_from_slice(&(ctr_reg).to_be_bytes()).expect(EXPECT_MSG);
@@ -302,7 +390,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
             en_pin.set_high().ok();
             self.delay.delay_ms(35);
         }       
-        self.comm.write(self.address, &(Registers::MeterControl as u8).to_be_bytes())?;
+        self.comm.write(self.address, &(Registers::MeterControl_EE as u8).to_be_bytes())?;
         self.comm.read(self.address, &mut (ctr_reg).to_be_bytes())?;
         ctr_reg = ctr_reg & 02;
         vec.extend_from_slice(&(ctr_reg).to_be_bytes()).expect(EXPECT_MSG);
