@@ -26,7 +26,7 @@ pub enum  Registers{
     ProductCode             = 0x70,
     CalibrationStatus       = 0x81,
     CalibrationCommand      = 0x82,
-
+    MeasurementPeriod_EE    = 0x96,
     MeasurementMode         = 0x95,
     MeterControl            = 0xA5,
     StartMesurement         = 0xC3,
@@ -51,7 +51,7 @@ pub enum ErrorStatus <E>{
     NoMeasurementCompleted,
 }
 /////////////////////////////////////////////////////////////////
-#[derive(Debug)]
+#[derive(Debug,Default,Clone)]
 pub struct Config {
     pub SingleMeasurementMode: u8,
     pub MeasurementPeriod: u16,
@@ -120,6 +120,7 @@ pub struct Sunrise<'a,T,D,EN,NRDY> {
     n_rdy_pin:NRDY,
     address: u8,
     state_buf:[u8;24],
+    config:Config
 }
 
 
@@ -133,6 +134,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
             n_rdy_pin:nrdy_pin,
             address,
             state_buf:[0x00;24],
+            config:Config::default()
         }
     }
 
@@ -144,6 +146,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
             n_rdy_pin:nrdy_pin,
             address: ADDRESS,
             state_buf:[0x00;24],
+            config:Config::default()
         }
     }
 
@@ -153,8 +156,10 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         self.comm.write(self.address, &(Registers::MeasurementMode as u8).to_be_bytes())?;
         self.comm.read(self.address, &mut buf)?;
 
-    
-        Ok(Config::from_bytes(&buf))
+        let read_config = Config::from_bytes(&buf);
+        self.config = read_config.clone();
+   
+        Ok(read_config)
 
     }
 
@@ -230,11 +235,11 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         self.comm.read(self.address, &mut self.state_buf)
     }
 
-    fn is_equal<F: PartialEq>(a: F, b: F) -> bool {
+    fn is_equal<F: PartialEq>(&mut self,a: F, b: F) -> bool {
         a == b
     }
 
-    pub fn init (&mut self,press_comp:bool, iir_filter:bool, abc:bool, continuous_mode:bool) -> Result<(), E> {
+    pub fn init (&mut self,config:Config) -> Result<(), E> {
 
         let mut ctr_reg:u8 = 0;
         let mut vec: Vec<u8, 2> = Vec::new();
@@ -247,46 +252,20 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         
         self.sensor_state_data_get()?;
 
-
-        self.comm.write(self.address, &(Registers::MeterControl as u8).to_be_bytes())?;
-        self.comm.read(self.address, &mut (ctr_reg).to_be_bytes())?;
-        vec.extend_from_slice(&(Registers::MeterControl as u8).to_be_bytes()).expect(EXPECT_MSG);
-
-        ctr_reg = if iir_filter {
-            ctr_reg & 0xF3
-        } else {
-            ctr_reg | 0xFC
-        };
-        
-        ctr_reg = if press_comp {
-            ctr_reg & 0xEF
-        } else {
-            ctr_reg | 0xF0
-        };
-
-        ctr_reg = if abc {
-            ctr_reg & 0xFD
-        } else {
-            ctr_reg |  0x02
-        };
-
-        vec.extend_from_slice(&(ctr_reg).to_be_bytes()).expect(EXPECT_MSG);
-        self.comm.write(self.address, &vec)?;
-        vec.clear();
-
-        vec.extend_from_slice(&(Registers::MeasurementMode as u8).to_be_bytes()).expect(EXPECT_MSG);
-
-        if continuous_mode{           
-            vec.extend_from_slice(&(0x00 as u8).to_be_bytes()).expect(EXPECT_MSG);
-            
+        if let false = self.is_equal(config.SingleMeasurementMode,self.config.SingleMeasurementMode)
+        {
+            vec.extend_from_slice(&(Registers::MeterControl as u8).to_be_bytes()).expect(EXPECT_MSG);
+            vec.extend_from_slice(&(config.SingleMeasurementMode as u8).to_be_bytes()).expect(EXPECT_MSG);
+            self.comm.write(self.address, &vec)?;
+            vec.clear();
         }
-        else {
-            vec.extend_from_slice(&(0x01 as u8).to_be_bytes()).expect(EXPECT_MSG);
+        if let false = self.is_equal(config.MeasurementPeriod,self.config.MeasurementPeriod)
+        {
+            vec.extend_from_slice(&(Registers::MeasurementPeriod_EE as u8).to_be_bytes()).expect(EXPECT_MSG);
+            vec.extend_from_slice(&(config.MeasurementPeriod as u16).to_be_bytes()).expect(EXPECT_MSG);
+            self.comm.write(self.address, &vec)?;
+            vec.clear();
         }
-
-        self.comm.write(self.address, &vec)?;
-
-        self.sensor_state_data_get()?;
 
         if let Some(ref mut en_pin) = self.en_pin {
             en_pin.set_low().ok(); 
