@@ -100,8 +100,18 @@ fn main() -> ! {
 
     let mut sensor_CO2 = test.take().unwrap();
 
-    let state = sensor_CO2.init(false,true,false,false);
+    // let mut config = sensor_CO2.get_config().unwrap();
 
+    // config.NumberOfSamples = 4;
+    let updated_config = sensor_CO2.get_config().and_then(|mut config| {
+        config.NumberOfSamples = 4;
+        Ok(config)  // Возвращаем обновленную конфигурацию
+    }).unwrap();
+
+    //info!("Program start {}", format!("{:?}", updated_config));
+    info!("{:?}", updated_config);
+
+   // let gh =sensor_CO2.init(Some(updated_config));
     
     
     loop {

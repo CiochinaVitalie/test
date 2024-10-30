@@ -59,7 +59,7 @@ pub enum ErrorStatus <E>{
     NoMeasurementCompleted,
 }
 /////////////////////////////////////////////////////////////////
-#[derive(Debug,Default,Clone)]
+#[derive(Default,Clone)]
 pub struct Config {
     pub SingleMeasurementMode: u8,
     pub MeasurementPeriod: u16,
@@ -72,8 +72,45 @@ pub struct Config {
     pub Nominator:u16,
     pub Denominator:u16,
     pub ScaledABCTarget:u16
-
 }
+
+impl core::fmt::Debug for Config {
+    fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        fmt.debug_struct("Config")
+            .field("SingleMeasurementMode", &format_args!("{:x}", self.SingleMeasurementMode))
+            .field("MeasurementPeriod", &self.MeasurementPeriod)
+            .field("NumberOfSamples", &self.NumberOfSamples)
+            .field("ABCPeriod", &self.ABCPeriod)
+            .field("ABCTarget", &self.ABCTarget)
+            .field("IIRFilter", &self.IIRFilter)
+            .field("MeterControl", &self.MeterControl)
+            .field("I2CAddres", &self.I2CAddres)
+            .field("Nominator", &self.Nominator)
+            .field("Denominator", &self.Denominator)
+            .field("ScaledABCTarget", &self.ScaledABCTarget)
+            .finish()
+}
+}
+
+// #[cfg(feature = "defmt")]
+impl defmt::Format for Config {
+    fn format(&self, fmt: defmt::Formatter) {
+        defmt::write!(fmt, "Config {{");
+        defmt::write!(fmt, "SingleMeasurementMode: {=u8}, ", self.SingleMeasurementMode);
+        defmt::write!(fmt, "MeasurementPeriod: {=u16}, ", self.MeasurementPeriod);
+        defmt::write!(fmt, "NumberOfSamples: {=u16}, ", self.NumberOfSamples);
+        defmt::write!(fmt, "ABCPeriod: {=u16}, ", self.ABCPeriod);
+        defmt::write!(fmt, "ABCTarget: {=u16}, ", self.ABCTarget);
+        defmt::write!(fmt, "IIRFilter: {=u8}, ", self.IIRFilter);
+        defmt::write!(fmt, "MeterControl: {=u8}, ", self.MeterControl);
+        defmt::write!(fmt, "I2CAddres: {=u8}, ", self.I2CAddres);
+        defmt::write!(fmt, "Nominator: {=u16}, ", self.Nominator);
+        defmt::write!(fmt, "Denominator: {=u16}, ", self.Denominator);
+        defmt::write!(fmt, "ScaledABCTarget: {=u16}", self.ScaledABCTarget);
+        defmt::write!(fmt, " }}");
+    }
+}
+
 impl Config {
     fn from_bytes(buf: &[u8; 25]) -> Self {
         let SingleMeasurementMode = u8::from(buf[0]);
@@ -133,18 +170,6 @@ pub struct Sunrise<'a,T,D,EN,NRDY> {
 
 
 impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Write<Error = E>, D:DelayMs<u32> + 'a,EN:OutputPin,NRDY:InputPin {
-    
-    pub fn new_with_address(i2c: T, address: u8,delay:&'a mut D,en_pin:Option<EN>,nrdy_pin:NRDY) -> Self {
-        Sunrise {
-            comm: i2c,
-            delay:delay,
-            en_pin:en_pin,
-            n_rdy_pin:nrdy_pin,
-            address,
-            state_buf:[0x00;24],
-            config:Config::default()
-        }
-    }
 
     pub fn new(i2c: T, delay:&'a mut D,en_pin:Option<EN>,nrdy_pin:NRDY) -> Self {
         Sunrise {
@@ -358,37 +383,65 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
      Ok(())
     }
 
-    fn background_calibration(&mut self) -> Result<(), ErrorStatus<E>> {
+   pub fn background_calibration(&mut self) -> Result<(), ErrorStatus<E>> {
 
         let mut vec: Vec<u8, 2> = Vec::new();
         let mut buf = [0u8; 1];
+
+        self.en_pin_set();
+        self.delay.delay_ms(35);
+
         vec.extend_from_slice(&(Registers::CalibrationStatus as u8).to_be_bytes()).expect(EXPECT_MSG);
         vec.extend_from_slice(&(0x00 as u8).to_be_bytes()).expect(EXPECT_MSG);
         self.comm.write(self.address, &vec).map_err(ErrorStatus::I2c)?;
         vec.clear();
 
+
+
         vec.extend_from_slice(&(Registers::CalibrationCommand as u8).to_be_bytes()).expect(EXPECT_MSG);
         vec.extend_from_slice(&(0x07C06 as u16).to_be_bytes()).expect(EXPECT_MSG);
         self.comm.write(self.address, &vec).map_err(ErrorStatus::I2c)?;
 
+
+        if(self.config.SingleMeasurementMode == 0x01)
+        {
+            self.sensor_state_data_set().map_err(ErrorStatus::I2c)?;
+
+            loop
+            {
+                if let Ok(true) = self.n_rdy_pin.is_low()
+                {              
+                   break; 
+                }
+            }
+        }
+
         self.comm.write(self.address, &(Registers::CalibrationStatus as u8).to_be_bytes()).map_err(ErrorStatus::I2c)?;
         self.comm.read(self.address, &mut buf).map_err(ErrorStatus::I2c)?;
 
+        self.en_pin_reset();
+
         if let 0x20 = buf[0]{
+            if(self.config.SingleMeasurementMode == 0x01)
+            {
+                self.sensor_state_data_get().map_err(ErrorStatus::I2c)?;
+            }
             return Ok(());
         }else{
             return Err(ErrorStatus::CalibrationError);
         }
     }
 
-    pub fn init (&mut self,config:Config) -> Result<(), E> {
+    pub fn init (&mut self,config_sensor:Option<Config>) -> Result<(), E> {
 
         self.en_pin_set();
         self.delay.delay_ms(35);
         
         self.sensor_state_data_get()?;
-        self.set_config(config);
 
+        if let Some(config) = config_sensor {
+            self.set_config(config);
+        }
         self.en_pin_reset();
 
         Ok(())
