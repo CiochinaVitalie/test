@@ -158,19 +158,6 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         }
     }
 
-    pub fn get_default_config(&mut self)-> Result<Config, E> {
-        let mut buf = [0u8; 25];
-
-        self.comm.write(self.address, &(Registers::MeasurementMode_EE as u8).to_be_bytes())?;
-        self.comm.read(self.address, &mut buf)?;
-
-        let read_config = Config::from_bytes(&buf);
-        self.config = read_config.clone();
-   
-        Ok(read_config)
-
-    }
-
     pub fn fimware_get(&mut self) -> Result<u16, E> {
         let mut buf = [0u8; 2];
 
@@ -263,22 +250,32 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         }
     }
 
-    fn check_config_before_write(&mut self) -> Result<(), E> {
+    pub fn get_config(&mut self)-> Result<Config, E> {
+        let mut buf = [0u8; 25];
 
+        self.en_pin_set();
+        self.delay.delay_ms(35);
 
-     Ok(())
+        self.comm.write(self.address, &(Registers::MeasurementMode_EE as u8).to_be_bytes())?;
+        self.comm.read(self.address, &mut buf)?;
+
+        let read_config = Config::from_bytes(&buf);
+        self.config = read_config.clone();
+
+        self.en_pin_reset();
+   
+        Ok(read_config)
+
     }
 
-    pub fn init (&mut self,config:Config) -> Result<(), E> {
 
-        let mut ctr_reg:u8 = 0;
+   pub fn set_config(&mut self,config:Config) -> Result<(), E> {
+
         let mut vec: Vec<u8, 2> = Vec::new();
 
         self.en_pin_set();
         self.delay.delay_ms(35);
         
-        self.sensor_state_data_get()?;
-
         if let false = self.is_equal(config.SingleMeasurementMode,self.config.SingleMeasurementMode)
         {
             vec.extend_from_slice(&(Registers::MeterControl_EE as u8).to_be_bytes()).expect(EXPECT_MSG);
@@ -358,58 +355,52 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
 
         self.en_pin_reset();
 
-        Ok(())
+     Ok(())
     }
 
-    pub fn enable_abc(&mut self)-> Result<(), E> {
+    fn background_calibration(&mut self) -> Result<(), ErrorStatus<E>> {
 
-        let mut ctr_reg:u8 = 0xFF;
         let mut vec: Vec<u8, 2> = Vec::new();
+        let mut buf = [0u8; 1];
+        vec.extend_from_slice(&(Registers::CalibrationStatus as u8).to_be_bytes()).expect(EXPECT_MSG);
+        vec.extend_from_slice(&(0x00 as u8).to_be_bytes()).expect(EXPECT_MSG);
+        self.comm.write(self.address, &vec).map_err(ErrorStatus::I2c)?;
+        vec.clear();
 
-        if let Some(ref mut en_pin) = self.en_pin {
-            en_pin.set_high().ok();
-            self.delay.delay_ms(35);
+        vec.extend_from_slice(&(Registers::CalibrationCommand as u8).to_be_bytes()).expect(EXPECT_MSG);
+        vec.extend_from_slice(&(0x07C06 as u16).to_be_bytes()).expect(EXPECT_MSG);
+        self.comm.write(self.address, &vec).map_err(ErrorStatus::I2c)?;
+
+        self.comm.write(self.address, &(Registers::CalibrationStatus as u8).to_be_bytes()).map_err(ErrorStatus::I2c)?;
+        self.comm.read(self.address, &mut buf).map_err(ErrorStatus::I2c)?;
+
+        if let 0x20 = buf[0]{
+            return Ok(());
+        }else{
+            return Err(ErrorStatus::CalibrationError);
         }
+    }
+
+    pub fn init (&mut self,config:Config) -> Result<(), E> {
+
+        self.en_pin_set();
+        self.delay.delay_ms(35);
         
-        self.comm.write(self.address, &(Registers::MeterControl_EE as u8).to_be_bytes())?;
-        self.comm.read(self.address, &mut (ctr_reg).to_be_bytes())?;
-        ctr_reg = ctr_reg & 0xFD;
-        vec.extend_from_slice(&(ctr_reg).to_be_bytes()).expect(EXPECT_MSG);
-        self.comm.write(self.address, &vec)?;
+        self.sensor_state_data_get()?;
+        self.set_config(config);
 
-        if let Some(ref mut en_pin) = self.en_pin {
-            en_pin.set_low().ok(); 
-        }
-        Ok(())
-    }
-    pub fn disable_abc(&mut self)-> Result<(), E> {
+        self.en_pin_reset();
 
-        let mut ctr_reg:u8 = 0xFD;
-        let mut vec: Vec<u8, 2> = Vec::new();
-        if let Some(ref mut en_pin) = self.en_pin {
-            en_pin.set_high().ok();
-            self.delay.delay_ms(35);
-        }       
-        self.comm.write(self.address, &(Registers::MeterControl_EE as u8).to_be_bytes())?;
-        self.comm.read(self.address, &mut (ctr_reg).to_be_bytes())?;
-        ctr_reg = ctr_reg & 02;
-        vec.extend_from_slice(&(ctr_reg).to_be_bytes()).expect(EXPECT_MSG);
-        self.comm.write(self.address, &vec)?;
-
-        if let Some(ref mut en_pin) = self.en_pin {
-            en_pin.set_low().ok(); 
-        }
         Ok(())
     }
 
     pub fn CO2_measurement_get(&mut self) -> Result<Measurement, ErrorStatus<E>> {
-        let mut vec: Vec<u8, 2> = Vec::new();
+ 
         let mut buf = [0u8; 10];
-        if let Some(ref mut en_pin) = self.en_pin {
-            en_pin.set_high().ok();
-            self.delay.delay_ms(35);
-        }
-        
+
+        self.en_pin_set();
+        self.delay.delay_ms(35);
+
         self.clear_error_status().map_err(ErrorStatus::I2c)?;
         self.sensor_state_data_set().map_err(ErrorStatus::I2c)?;
 
@@ -427,9 +418,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         self.sensor_state_data_get().map_err(ErrorStatus::I2c)?;
 
 
-        if let Some(ref mut en_pin) = self.en_pin {
-            en_pin.set_low().ok(); 
-        }
+        self.en_pin_reset();
 
         let sensor_err = ((buf[0] as u16) << 8) | (buf[1] as u16);
 
