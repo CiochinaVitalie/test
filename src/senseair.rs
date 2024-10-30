@@ -42,7 +42,7 @@ pub enum  Registers{
     ClearErrorStatus        = 0x9D
 }
 
-// #[derive(Debug)]
+#[derive(Debug)]
 pub enum ErrorStatus <E>{
     I2c(E), 
     LowInternalRegulatedVoltage,
@@ -57,6 +57,12 @@ pub enum ErrorStatus <E>{
     OutOfRange,
     MemoryError,
     NoMeasurementCompleted,
+}
+pub enum  ProductType{
+    FirmwareType(u8),
+    FirmwareRev (u8,u8),
+    SensorId(u32),
+    ProductCode (&str)
 }
 /////////////////////////////////////////////////////////////////
 #[derive(Default,Clone)]
