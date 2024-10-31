@@ -4,6 +4,7 @@ use embedded_hal::digital::v2::{OutputPin,InputPin};
 use embedded_hal::blocking::delay::DelayMs;
 use byteorder::{BigEndian, ByteOrder};
 use core::cell::RefCell;
+use core::str;
 
 use heapless::Vec;
 
@@ -201,9 +202,21 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         self.comm.read(self.address, &mut buf)?;
 
         let id = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
+
+        let product_code = str::from_utf8(&buf[10..]).unwrap();
+
         self.product_type = ProductType::FirmwareType(buf[0]);
         self.product_type = ProductType::FirmwareRev(buf[2], buf[3]);
         self.product_type = ProductType::SensorId(id);
+
+        if let ProductType::FirmwareRev(main, sub) =  self.product_type {
+            if main >= 4 && sub >= 8{
+                self.product_type = ProductType::ProductCode(product_code)
+            }else{
+                self.product_type = ProductType::ProductCode("not supported");
+            }
+        }
+        // 
         Ok(())
     }
 
