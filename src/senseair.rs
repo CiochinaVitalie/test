@@ -58,11 +58,14 @@ pub enum ErrorStatus <E>{
     MemoryError,
     NoMeasurementCompleted,
 }
-pub enum  ProductType{
+#[derive(Default)]
+pub enum  ProductType<'a>{
+    #[default]
+    Unknown,
     FirmwareType(u8),
     FirmwareRev (u8,u8),
     SensorId(u32),
-    ProductCode (&str)
+    ProductCode (&'a str)
 }
 /////////////////////////////////////////////////////////////////
 #[derive(Default,Clone)]
@@ -171,7 +174,8 @@ pub struct Sunrise<'a,T,D,EN,NRDY> {
     n_rdy_pin:NRDY,
     address: u8,
     state_buf:[u8;24],
-    config:Config
+    config:Config,
+    product_type: ProductType<'a>
 }
 
 
@@ -185,51 +189,48 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
             n_rdy_pin:nrdy_pin,
             address: ADDRESS,
             state_buf:[0x00;24],
-            config:Config::default()
+            config:Config::default(),
+            product_type:ProductType::default()
         }
     }
 
-    pub fn fimware_get(&mut self) -> Result<u16, E> {
-        let mut buf = [0u8; 2];
+    fn product_type_get(&mut self) -> Result<() , E> {
+        let mut buf = [0u8; 21];
 
-        if let Some(ref mut en_pin) = self.en_pin {
-            en_pin.set_high().ok();
-            self.delay.delay_ms(35);
-        }
-           
-        self.comm.write(self.address, &(Registers::FirmwareVer as u8).to_be_bytes())?;
+        self.comm.write(self.address, &(Registers::FirmwareType as u8).to_be_bytes())?;
         self.comm.read(self.address, &mut buf)?;
 
-        if let Some(ref mut en_pin) = self.en_pin {
-            en_pin.set_low().ok();
-        }
-        Ok(u16::from_be_bytes(buf))
+        let id = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
+        self.product_type = ProductType::FirmwareType(buf[0]);
+        self.product_type = ProductType::FirmwareRev(buf[2], buf[3]);
+        self.product_type = ProductType::SensorId(id);
+        Ok(())
     }
 
     fn check_sensor_error(&mut self,sensor_err: u16) -> Option<ErrorStatus<E>> {
-        if sensor_err & (1 << 16) != 0 {
+        if sensor_err & (1 << 16) as u16 != 0 {
             Some(ErrorStatus::LowInternalRegulatedVoltage)
-        } else if sensor_err & (1 << 15) != 0 {
+        } else if sensor_err & (1 << 15) as u16 != 0 {
             Some(ErrorStatus::MeasurementTimeout)
-        } else if sensor_err & (1 << 14) != 0 {
+        } else if sensor_err & (1 << 14) as u16 != 0 {
             Some(ErrorStatus::AbnormalSignalLevel)
-        } else if sensor_err & (1 << 8) != 0 {
+        } else if sensor_err & (1 << 8) as u16 != 0 {
             Some(ErrorStatus::ScaleFactorError)
-        } else if sensor_err & (1 << 7) != 0 {
+        } else if sensor_err & (1 << 7) as u16 != 0 {
             Some(ErrorStatus::FatalError)
-        } else if sensor_err & (1 << 6) != 0 {
+        } else if sensor_err & (1 << 6) as u16 != 0 {
             Some(ErrorStatus::I2cError)
-        } else if sensor_err & (1 << 5) != 0 {
+        } else if sensor_err & (1 << 5) as u16 != 0 {
             Some(ErrorStatus::AlgoritmError)
-        } else if sensor_err & (1 << 4) != 0 {
+        } else if sensor_err & (1 << 4) as u16 != 0 {
             Some(ErrorStatus::CalibrationError)
-        } else if sensor_err & (1 << 3) != 0 {
+        } else if sensor_err & (1 << 3) as u16 != 0 {
             Some(ErrorStatus::SelfDiagnosticsError)
-        } else if sensor_err & (1 << 2) != 0 {
+        } else if sensor_err & (1 << 2) as u16 != 0 {
             Some(ErrorStatus::OutOfRange)
-        } else if sensor_err & (1 << 1) != 0 {
+        } else if sensor_err & (1 << 1) as u16 != 0 {
             Some(ErrorStatus::MemoryError)
-        } else if sensor_err & (1 << 0) != 0 {
+        } else if sensor_err & (1 << 0) as u16 != 0 {
             Some(ErrorStatus::NoMeasurementCompleted)
         }        
         else {
