@@ -60,6 +60,7 @@ pub enum ErrorStatus <E>{
     MemoryError,
     NoMeasurementCompleted,
 }
+/////////////////////////////////////////////////////////////////
 #[derive(Default)]
 pub enum  ProductType{
     #[default]
@@ -68,6 +69,37 @@ pub enum  ProductType{
     FirmwareRev (u8,u8),
     SensorId(u32),
     ProductCode (String<11>)
+}
+impl core::fmt::Debug for ProductType {
+    fn fmt(&self, f: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        match self {
+            ProductType::Unknown => write!(f, "Unknown"),
+            ProductType::FirmwareType(version) => write!(f, "FirmwareType({})", version),
+            ProductType::FirmwareRev(major, minor) => write!(f, "FirmwareRev({}.{})", major, minor),
+            ProductType::SensorId(id) => write!(f, "SensorId({})", id),
+            ProductType::ProductCode(code) => write!(f, "ProductCode({})", code),
+        }
+    }
+}
+// #[cfg(feature = "defmt")]
+impl defmt::Format for ProductType {
+    fn format(&self, fmt: defmt::Formatter) {
+        match self {
+            ProductType::Unknown => defmt::write!(fmt, "Unknown"),
+            ProductType::FirmwareType(version) => {
+                defmt::write!(fmt, "FirmwareType({})", version);
+            }
+            ProductType::FirmwareRev(major, minor) => {
+                defmt::write!(fmt, "FirmwareRev({}.{})", major, minor);
+            }
+            ProductType::SensorId(id) => {
+                defmt::write!(fmt, "SensorId({})", id);
+            }
+            ProductType::ProductCode(code) => {
+                defmt::write!(fmt, "ProductCode({})", code.as_str());
+            }
+        }
+    }
 }
 /////////////////////////////////////////////////////////////////
 #[derive(Default,Clone)]
@@ -177,7 +209,7 @@ pub struct Sunrise<'a,T,D,EN,NRDY> {
     address: u8,
     state_buf:[u8;24],
     config:Config,
-    product_type: ProductType
+    product_type:ProductType
 }
 
 
@@ -215,9 +247,9 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
 
         if let ProductType::FirmwareRev(main, sub) =  self.product_type {
             if main >= 4 && sub >= 8{
-                self.product_type = ProductType::ProductCode(product_code)
+                self.product_type = ProductType::ProductCode(product_code);
             }else{
-                self.product_type = ProductType::ProductCode(String::try_from("No Supporte").unwrap());
+                self.product_type = ProductType::ProductCode(String::try_from("No Support").unwrap());
             }
         }
         // 
@@ -457,15 +489,22 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
     pub fn init (&mut self,config_sensor:Option<Config>) -> Result<(), E> {
 
         self.en_pin_set();
+
+        self.product_type_get()?;
         
         self.sensor_state_data_get()?;
 
         if let Some(config) = config_sensor {
-            self.set_config(config);
+            self.set_config(config)?;
         }
         self.en_pin_reset();
 
         Ok(())
+    }
+
+    pub fn fw_get(&mut self)-> &ProductType{
+
+        &self.product_type
     }
 
     pub fn CO2_measurement_get(&mut self) -> Result<Measurement, ErrorStatus<E>> {
