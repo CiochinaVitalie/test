@@ -7,6 +7,7 @@ use core::cell::RefCell;
 use core::str;
 
 use heapless::Vec;
+use heapless::String;
 
 const EXPECT_MSG: &str = "Vec was not large enough";
 const ADDRESS: u8 = 0x68;
@@ -60,13 +61,13 @@ pub enum ErrorStatus <E>{
     NoMeasurementCompleted,
 }
 #[derive(Default)]
-pub enum  ProductType<'a>{
+pub enum  ProductType{
     #[default]
     Unknown,
     FirmwareType(u8),
     FirmwareRev (u8,u8),
     SensorId(u32),
-    ProductCode (&'a str)
+    ProductCode (String<11>)
 }
 /////////////////////////////////////////////////////////////////
 #[derive(Default,Clone)]
@@ -176,7 +177,7 @@ pub struct Sunrise<'a,T,D,EN,NRDY> {
     address: u8,
     state_buf:[u8;24],
     config:Config,
-    product_type: ProductType<'a>
+    product_type: ProductType
 }
 
 
@@ -197,23 +198,26 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
 
     fn product_type_get(&mut self) -> Result<() , E> {
         let mut buf = [0u8; 21];
+        let mut vec: Vec<u8, 11> = Vec::new();
 
         self.comm.write(self.address, &(Registers::FirmwareType as u8).to_be_bytes())?;
-        self.comm.read(self.address, &mut buf)?;
+        self.comm.read(self.address, & mut buf)?;
 
         let id = u32::from_be_bytes([buf[4], buf[5], buf[6], buf[7]]);
 
-        let product_code = str::from_utf8(&buf[10..]).unwrap();
-
+        
         self.product_type = ProductType::FirmwareType(buf[0]);
         self.product_type = ProductType::FirmwareRev(buf[2], buf[3]);
         self.product_type = ProductType::SensorId(id);
+
+        vec.extend_from_slice(&buf[10 ..]).expect(EXPECT_MSG);
+        let product_code = String::from_utf8(vec).unwrap();
 
         if let ProductType::FirmwareRev(main, sub) =  self.product_type {
             if main >= 4 && sub >= 8{
                 self.product_type = ProductType::ProductCode(product_code)
             }else{
-                self.product_type = ProductType::ProductCode("not supported");
+                self.product_type = ProductType::ProductCode(String::try_from("No Supporte").unwrap());
             }
         }
         // 
@@ -285,6 +289,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
 
         if let Some(ref mut en_pin) = self.en_pin {
             en_pin.set_high().ok();
+            self.delay.delay_ms(35);
         }
     }
 
@@ -299,7 +304,6 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         let mut buf = [0u8; 25];
 
         self.en_pin_set();
-        self.delay.delay_ms(35);
 
         self.comm.write(self.address, &(Registers::MeasurementMode_EE as u8).to_be_bytes())?;
         self.comm.read(self.address, &mut buf)?;
@@ -319,7 +323,6 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         let mut vec: Vec<u8, 2> = Vec::new();
 
         self.en_pin_set();
-        self.delay.delay_ms(35);
         
         if let false = self.is_equal(config.SingleMeasurementMode,self.config.SingleMeasurementMode)
         {
@@ -409,7 +412,6 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         let mut buf = [0u8; 1];
 
         self.en_pin_set();
-        self.delay.delay_ms(35);
 
         vec.extend_from_slice(&(Registers::CalibrationStatus as u8).to_be_bytes()).expect(EXPECT_MSG);
         vec.extend_from_slice(&(0x00 as u8).to_be_bytes()).expect(EXPECT_MSG);
@@ -455,7 +457,6 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
     pub fn init (&mut self,config_sensor:Option<Config>) -> Result<(), E> {
 
         self.en_pin_set();
-        self.delay.delay_ms(35);
         
         self.sensor_state_data_get()?;
 
@@ -472,7 +473,6 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         let mut buf = [0u8; 10];
 
         self.en_pin_set();
-        self.delay.delay_ms(35);
 
         self.clear_error_status().map_err(ErrorStatus::I2c)?;
         self.sensor_state_data_set().map_err(ErrorStatus::I2c)?;
