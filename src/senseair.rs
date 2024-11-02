@@ -28,6 +28,7 @@ pub enum  Registers{
     ProductCode             = 0x70,
     CalibrationStatus       = 0x81,
     CalibrationCommand      = 0x82,
+    CalibrationTarget       = 0x84,
     MeasurementMode_EE      = 0x95,
     MeasurementPeriod_EE    = 0x96,
     NumberOfSamples_EE      = 0x98,
@@ -459,6 +460,16 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         }else{
             return Err(ErrorStatus::CalibrationError);
         }
+    }
+
+    pub fn target_calibration(&mut self, value:u16) -> Result<(), E> {
+        
+        self.en_pin_set();
+        self.comm.write(self.address, &(Registers::CalibrationTarget as u8).to_be_bytes())?;
+        self.comm.write(self.address, &(value as u16).to_be_bytes())?;
+        self.en_pin_reset();
+        
+        Ok(())
     }
 
     pub fn init (&mut self,config_sensor:Option<Config>) -> Result<(), E> {
