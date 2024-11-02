@@ -110,8 +110,9 @@ fn main() -> ! {
 
     info!("{:?}", updated_config);
 
-   // let gh =sensor_CO2.init(Some(updated_config));
-    
+    let gh = sensor_CO2.init(Some(updated_config)).unwrap();
+    let info = sensor_CO2.fw_info_get();
+
     
     loop {
 

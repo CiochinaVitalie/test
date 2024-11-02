@@ -68,7 +68,7 @@ pub enum  ProductType{
     FirmwareType(u8),
     FirmwareRev (u8,u8),
     SensorId(u32),
-    ProductCode (String<11>)
+    ProductCode (String<20>)
 }
 /////////////////////////////////////////////////////////////////
 #[derive(Default,Clone)]
@@ -199,7 +199,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
 
     fn product_type_get(&mut self) -> Result<() , E> {
         let mut buf = [0u8; 18];
-        let mut vec: Vec<u8, 11> = Vec::new();
+        let mut vec: Vec<u8, 20> = Vec::new();
 
         self.comm.write(self.address, &(Registers::FirmwareType as u8).to_be_bytes())?;
         self.comm.read(self.address, & mut [buf[0]])?;
@@ -207,9 +207,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         self.comm.read(self.address, & mut buf[1..3])?;
         self.comm.write(self.address, &(Registers::SensorId as u8).to_be_bytes())?;
         self.comm.read(self.address, & mut buf[3..7])?;
-        self.comm.write(self.address, &(Registers::ProductCode as u8).to_be_bytes())?;
-        self.comm.read(self.address, & mut buf[7..])?;
-
+        
 
         let id = u32::from_be_bytes([buf[3], buf[4], buf[5], buf[6]]);
 
@@ -218,11 +216,14 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         self.product_type = ProductType::FirmwareRev(buf[1], buf[2]);
         self.product_type = ProductType::SensorId(id);
 
-        vec.extend_from_slice(&buf[7..]).expect(EXPECT_MSG);
-        let product_code = String::from_utf8(vec).unwrap();
+        
 
         if let ProductType::FirmwareRev(main, sub) =  self.product_type {
             if main >= 4 && sub >= 8{
+                self.comm.write(self.address, &(Registers::ProductCode as u8).to_be_bytes())?;
+                self.comm.read(self.address, & mut buf[7..])?;
+                vec.extend_from_slice(&buf[7..]).expect(EXPECT_MSG);
+                let product_code = String::from_utf8(vec).unwrap();
                 self.product_type = ProductType::ProductCode(product_code)
             }else{
                 self.product_type = ProductType::ProductCode(String::try_from("No Supporte").unwrap());
@@ -328,7 +329,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
 
    pub fn set_config(&mut self,config:Config) -> Result<(), E> {
 
-        let mut vec: Vec<u8, 2> = Vec::new();
+        let mut vec: Vec<u8, 3> = Vec::new();
 
         self.en_pin_set();
         
@@ -336,7 +337,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         {
             vec.extend_from_slice(&(Registers::MeterControl_EE as u8).to_be_bytes()).expect(EXPECT_MSG);
             vec.extend_from_slice(&(config.SingleMeasurementMode as u8).to_be_bytes()).expect(EXPECT_MSG);
-            self.comm.write(self.address, &vec)?;
+            self.comm.write(self.address, &vec[0..2])?;
             vec.clear();
         }
         if let false = self.is_equal(config.MeasurementPeriod,self.config.MeasurementPeriod)
@@ -433,7 +434,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         self.comm.write(self.address, &vec).map_err(ErrorStatus::I2c)?;
 
 
-        if(self.config.SingleMeasurementMode == 0x01)
+        if self.config.SingleMeasurementMode == 0x01
         {
             self.sensor_state_data_set().map_err(ErrorStatus::I2c)?;
 
@@ -477,6 +478,7 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         self.en_pin_set();
         
         self.sensor_state_data_get()?;
+        self.product_type_get()?;
 
         if let Some(config) = config_sensor {
             self.set_config(config)?;
@@ -484,6 +486,10 @@ impl<'a,T, E, D,EN,NRDY> Sunrise<'a,T,D,EN,NRDY> where T: Read<Error = E> + Writ
         self.en_pin_reset();
 
         Ok(())
+    }
+    pub fn fw_info_get(&mut self) -> &ProductType {
+
+        &self.product_type
     }
 
     pub fn CO2_measurement_get(&mut self) -> Result<Measurement, ErrorStatus<E>> {
