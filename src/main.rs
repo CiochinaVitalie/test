@@ -111,19 +111,18 @@ fn main() -> ! {
     info!("{:?}", updated_config);
 
     let gh = sensor_CO2.init(Some(updated_config)).unwrap();
-    let info = sensor_CO2.fw_info_get();
-
+    let fw_info = sensor_CO2.fw_info_get();
+    info!("{:?}", fw_info);
     
     loop {
 
-    // let data = sensor_CO2.single_measurement_get().unwrap();
+    let data = sensor_CO2.CO2_measurement_get(None).unwrap();
     
-    // let sensor_data = ((data[6] as u16) << 8) | (data[7] as u16);
-    // info!("Read CO2 data is {}",sensor_data);
+    info!("{:?}",data);
     
     unsafe {
         if let Some(delay) = GLOBAL_DELAY.as_mut() {
-            delay.delay_ms(15000);
+            delay.delay_ms(60000);
         }
     }
     }

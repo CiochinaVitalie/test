@@ -66,7 +66,32 @@ pub struct ProductType {
     MainRevision: u8,
     SubRevision: u8,
     SensorId: u32,
-    ProductCode: String<20>,
+    ProductCode: String<11>,
+}
+
+impl core::fmt::Debug for ProductType {
+    fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        fmt.debug_struct("ProductType")
+            .field("FirmwareType", &self.FirmwareType)
+            .field("MainRevision", &self.MainRevision)
+            .field("SubRevision", &self.SubRevision)
+            .field("SensorId", &self.SensorId)
+            .field("ProductCode", &self.ProductCode)
+            .finish()
+    }
+}
+
+// #[cfg(feature = "defmt")]
+impl defmt::Format for ProductType {
+    fn format(&self, fmt: defmt::Formatter) {
+        defmt::write!(fmt, "ProductType {{");
+        defmt::write!(fmt, "FirmwareType: {=u8}, ", self.FirmwareType);
+        defmt::write!(fmt, "MainRevision: {=u8}, ", self.MainRevision);
+        defmt::write!(fmt, "SubRevision: {=u8}, ", self.SubRevision);
+        defmt::write!(fmt, "SensorId: {=u32}, ", self.SensorId);
+        defmt::write!(fmt, "ProductCode: {}, ", self.ProductCode.as_str());
+        defmt::write!(fmt, " }}");
+    }
 }
 /////////////////////////////////////////////////////////////////
 #[derive(Default, Clone)]
@@ -158,7 +183,7 @@ impl Config {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(PartialEq, Eq, Clone)]
 pub struct Measurement {
     MeasuredFilteredPressComp: i16,
     Temperature: i16,
@@ -170,7 +195,39 @@ pub struct Measurement {
     ScaledMeasured: i16,
     ETC: u32,
 }
+impl core::fmt::Debug for Measurement {
+    fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
+        fmt.debug_struct("Measurement")
+            .field("MeasuredFilteredPressComp", &self.MeasuredFilteredPressComp)
+            .field("Temperature", &self.Temperature)
+            .field("MeasurementCount", &self.MeasurementCount)
+            .field("MeasurementCycleTime", &self.MeasurementCycleTime)
+            .field("MeasuredUnfilteredPressComp", &self.MeasuredUnfilteredPressComp)
+            .field("MeasuredFiltered", &self.MeasuredFiltered)
+            .field("MeasuredUnfiltered", &self.MeasuredUnfiltered)
+            .field("ScaledMeasured", &self.ScaledMeasured)
+            .field("ETC", &self.ETC)
+            .finish()
+    }
+}
 
+// #[cfg(feature = "defmt")]
+impl defmt::Format for Measurement {
+    fn format(&self, fmt: defmt::Formatter) {
+        defmt::write!(fmt, "Measurement {{");
+        defmt::write!(fmt, "MeasuredFilteredPressComp: {=i16}, ", self.MeasuredFilteredPressComp);
+        defmt::write!(fmt, "Temperature: {=i16}, ", self.Temperature);
+        defmt::write!(fmt, "MeasurementCount: {=u8}, ", self.MeasurementCount);
+        defmt::write!(fmt, "MeasurementCycleTime: {=u16}, ", self.MeasurementCycleTime);
+        defmt::write!(fmt, "MeasuredUnfilteredPressComp: {=i16}, ", self.MeasuredUnfilteredPressComp);
+        defmt::write!(fmt, "MeasuredFiltered: {=i16}, ", self.MeasuredFiltered);
+        defmt::write!(fmt, "MeasuredUnfiltered: {=i16}, ", self.MeasuredUnfiltered);
+        defmt::write!(fmt, "ScaledMeasured: {=i16}, ", self.ScaledMeasured);
+        defmt::write!(fmt, "ETC: {=u32}, ", self.ETC);
+
+        defmt::write!(fmt, " }}");
+    }
+}
 impl Measurement {
     fn from_bytes(buf: &[u8; 28]) -> Self {
         let MeasuredFilteredPressComp = i16::from_be_bytes([buf[6], buf[7]]);
@@ -230,7 +287,7 @@ where
 
     fn product_type_get(&mut self) -> Result<(), E> {
         let mut buf = [0u8; 18];
-        let mut vec: Vec<u8, 20> = Vec::new();
+        let mut vec: Vec<u8, 11> = Vec::new();
 
         self.comm
             .write(self.address, &(Registers::FirmwareType as u8).to_be_bytes())?;
