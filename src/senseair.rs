@@ -1,3 +1,5 @@
+#![deny(missing_docs)]
+
 use byteorder::{BigEndian, ByteOrder};
 use core::cell::RefCell;
 use core::str;
@@ -202,7 +204,10 @@ impl core::fmt::Debug for Measurement {
             .field("Temperature", &self.Temperature)
             .field("MeasurementCount", &self.MeasurementCount)
             .field("MeasurementCycleTime", &self.MeasurementCycleTime)
-            .field("MeasuredUnfilteredPressComp", &self.MeasuredUnfilteredPressComp)
+            .field(
+                "MeasuredUnfilteredPressComp",
+                &self.MeasuredUnfilteredPressComp,
+            )
             .field("MeasuredFiltered", &self.MeasuredFiltered)
             .field("MeasuredUnfiltered", &self.MeasuredUnfiltered)
             .field("ScaledMeasured", &self.ScaledMeasured)
@@ -215,11 +220,23 @@ impl core::fmt::Debug for Measurement {
 impl defmt::Format for Measurement {
     fn format(&self, fmt: defmt::Formatter) {
         defmt::write!(fmt, "Measurement {{");
-        defmt::write!(fmt, "MeasuredFilteredPressComp: {=i16}, ", self.MeasuredFilteredPressComp);
+        defmt::write!(
+            fmt,
+            "MeasuredFilteredPressComp: {=i16}, ",
+            self.MeasuredFilteredPressComp
+        );
         defmt::write!(fmt, "Temperature: {=i16}, ", self.Temperature);
         defmt::write!(fmt, "MeasurementCount: {=u8}, ", self.MeasurementCount);
-        defmt::write!(fmt, "MeasurementCycleTime: {=u16}, ", self.MeasurementCycleTime);
-        defmt::write!(fmt, "MeasuredUnfilteredPressComp: {=i16}, ", self.MeasuredUnfilteredPressComp);
+        defmt::write!(
+            fmt,
+            "MeasurementCycleTime: {=u16}, ",
+            self.MeasurementCycleTime
+        );
+        defmt::write!(
+            fmt,
+            "MeasuredUnfilteredPressComp: {=i16}, ",
+            self.MeasuredUnfilteredPressComp
+        );
         defmt::write!(fmt, "MeasuredFiltered: {=i16}, ", self.MeasuredFiltered);
         defmt::write!(fmt, "MeasuredUnfiltered: {=i16}, ", self.MeasuredUnfiltered);
         defmt::write!(fmt, "ScaledMeasured: {=i16}, ", self.ScaledMeasured);
@@ -272,6 +289,22 @@ where
     EN: OutputPin,
     NRDY: InputPin,
 {
+    /// Creates a new instance of the `Sunrise` struct.
+    ///
+    /// This function initializes the `Sunrise` sensor with the provided I2C communication
+    /// interface, delay mechanism, enable pin, and ready pin. It sets up necessary fields,
+    /// including the I2C address and default values for the sensor's configuration and product type.
+    ///
+    /// # Parameters
+    ///
+    /// - `i2c`: An instance of a type that implements the I2C communication trait.
+    /// - `delay`: A mutable reference to a delay object for timing operations.
+    /// - `en_pin`: An optional enable pin that controls power to the sensor.
+    /// - `nrdy_pin`: The non-ready pin that indicates when the sensor is ready for communication.
+    ///
+    /// # Returns
+    ///
+    /// Returns a new `Sunrise` instance, properly initialized and ready for use.
     pub fn new(i2c: T, delay: &'a mut D, en_pin: Option<EN>, nrdy_pin: NRDY) -> Self {
         Sunrise {
             comm: i2c,
@@ -285,6 +318,27 @@ where
         }
     }
 
+    /// Reads the sensor's ID, firmware type, revision, and product code if the firmware revision is 4.08 or later.
+    ///
+    /// # Returns
+    ///
+    /// This function returns a `Result`:
+    /// - `Ok(())` if the operation was successful.
+    /// - An error of type `E` if any communication or processing errors occur.
+    ///
+    /// # Operation
+    ///
+    /// The function performs the following steps:
+    /// 1. It initializes a buffer to store the data read from the sensor.
+    /// 2. It sends commands to read the firmware type, firmware version, and sensor ID from the specified registers.
+    /// 3. The firmware version is checked, and if it is 4.08 or later, it reads the product code as well.
+    /// 4. The read data is stored in the `product_type` structure, which holds information about:
+    ///    - Firmware type
+    ///    - Main revision
+    ///    - Sub revision
+    ///    - Sensor ID
+    ///    - Product code (if supported)
+    ///
     fn product_type_get(&mut self) -> Result<(), E> {
         let mut buf = [0u8; 18];
         let mut vec: Vec<u8, 11> = Vec::new();
@@ -316,10 +370,41 @@ where
             self.product_type.ProductCode = String::try_from("No Supporte").unwrap();
         }
 
-        //
         Ok(())
     }
 
+    /// Checks the sensor error register for specific error conditions.
+    ///
+    /// # Parameters
+    ///
+    /// - `sensor_err`: A 16-bit unsigned integer representing the error status bits returned by the sensor.
+    ///
+    /// # Operation
+    ///
+    /// This function examines the provided `sensor_err` value to determine if any specific error conditions are indicated.
+    /// Each error condition corresponds to a specific bit in the `sensor_err` value:
+    /// - Bit 16: Low Internal Regulated Voltage
+    /// - Bit 15: Measurement Timeout
+    /// - Bit 14: Abnormal Signal Level
+    /// - Bit 8: Scale Factor Error
+    /// - Bit 7: Fatal Error
+    /// - Bit 6: I2C Error
+    /// - Bit 5: Algorithm Error
+    /// - Bit 4: Calibration Error
+    /// - Bit 3: Self Diagnostics Error
+    /// - Bit 2: Out Of Range
+    /// - Bit 1: Memory Error
+    /// - Bit 0: No Measurement Completed
+    ///
+    /// If any of these bits are set in `sensor_err`, the corresponding `ErrorStatus` is returned wrapped in an `Option`.
+    /// If no errors are detected, `None` is returned.
+    ///
+    /// # Returns
+    ///
+    /// Returns an `Option<ErrorStatus<E>>`:
+    /// - `Some(ErrorStatus)` if an error condition is detected, indicating the type of error.
+    /// - `None` if no errors are present.
+    ///
     fn check_sensor_error(&mut self, sensor_err: u16) -> Option<ErrorStatus<E>> {
         if sensor_err & (1 << 16) as u16 != 0 {
             Some(ErrorStatus::LowInternalRegulatedVoltage)
@@ -350,6 +435,43 @@ where
         }
     }
 
+    /// Resets the error status register of the sensor.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Result<(), E>`, where:
+    /// - `Ok(())` indicates that the error status register has been successfully reset.
+    /// - `Err(E)` indicates an error occurred during the I2C communication process.
+    ///
+    /// # Usage
+    ///
+    /// Call this function when you need to reset any error status flags in the sensor, allowing for normal operation
+    /// to continue without being affected by previous error conditions.
+    ///
+    fn clear_error_status(&mut self) -> Result<(), E> {
+        let mut vec: Vec<u8, 2> = Vec::new();
+        vec.extend_from_slice(&(Registers::ClearErrorStatus as u8).to_be_bytes())
+            .expect(EXPECT_MSG);
+        vec.extend_from_slice(&(0x00 as u8).to_be_bytes())
+            .expect(EXPECT_MSG);
+        self.comm.write(self.address, &vec)?;
+        Ok(())
+    }
+
+    // Initiates a new measurement by sending the start measurement command and transferring the sensor state data
+    /// from the previous measurement cycle.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Result<(), E>`, where:
+    /// - `Ok(())` indicates that the command was successfully sent, and the sensor is now set up for a new measurement cycle.
+    /// - `Err(E)` represents any error that occurred during the I2C communication process.
+    ///
+    /// # Usage
+    ///
+    /// Call this function before initiating a new measurement cycle to ensure the sensor starts with the correct settings and
+    /// continuity from the previous measurement cycle.
+    ///
     fn sensor_state_data_set(&mut self) -> Result<(), E> {
         let mut vec: Vec<u8, 26> = Vec::new();
 
@@ -363,15 +485,17 @@ where
         Ok(())
     }
 
-    fn clear_error_status(&mut self) -> Result<(), E> {
-        let mut vec: Vec<u8, 2> = Vec::new();
-        vec.extend_from_slice(&(Registers::ClearErrorStatus as u8).to_be_bytes())
-            .expect(EXPECT_MSG);
-        vec.extend_from_slice(&(0x00 as u8).to_be_bytes())
-            .expect(EXPECT_MSG);
-        self.comm.write(self.address, &vec)?;
-        Ok(())
-    }
+    /// Reads the sensor's state data from the specified register range (0xC4 - 0xDB) and stores it for use in the next measurement cycle.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Result<(), E>`, where:
+    /// - `Ok(())` indicates that the data was read successfully.
+    /// - `Err(E)` represents an error encountered during the I2C communication process.
+    ///
+    /// # Usage
+    ///
+    /// This function is typically called before a measurement operation to ensure that the latest sensor state data is available.
 
     fn sensor_state_data_get(&mut self) -> Result<(), E> {
         self.comm
@@ -383,19 +507,67 @@ where
         a == b
     }
 
+    /// Drives the sensor's EN (Enable) pin high, activating the sensor.
+    ///
+    /// # Details
+    ///
+    /// - The `en_pin_set` function sets the EN pin to a high state, enabling or powering up the sensor.
+    /// - After setting the EN pin high, it waits for a minimum delay of 35 milliseconds to allow the sensor time to start up and stabilize.
+    ///   This delay is required for proper sensor initialization and should not be reduced, as doing so might result in incorrect behavior or initialization failure.
+    /// - The function only performs these actions if `self.en_pin` is initialized; if `self.en_pin` is `None`, it does nothing.
+    ///
+    /// # Usage
+    ///
+    /// Use this function to enable the sensor before performing any initialization or reading operations. Pair it with `en_pin_reset` to control
+    /// the sensor’s power state.
+
     fn en_pin_set(&mut self) {
         if let Some(ref mut en_pin) = self.en_pin {
             en_pin.set_high().ok();
+            /// Wait for minimum 35ms for sensor start-up and stabilisation
             self.delay.delay_ms(35);
         }
     }
 
+    /// Drives the sensor's EN (Enable) pin low, effectively disabling the sensor.
+    ///
+    /// # Details
+    ///
+    /// - The `en_pin_reset` function sets the EN pin to a low state. This typically disables or powers down the sensor,
+    ///   depending on the sensor’s design and how the EN pin is implemented.
+    /// - This function only attempts to set the EN pin low if `self.en_pin` has been initialized. If `self.en_pin` is `None`,
+    ///   no action is taken.
+    ///
+    /// # Usage
+    ///
+    /// Use this function when you need to disable the sensor, such as to conserve power or to reset its state. Pair with `en_pin_set`
+    /// for toggling the sensor’s power state.
     fn en_pin_reset(&mut self) {
         if let Some(ref mut en_pin) = self.en_pin {
             en_pin.set_low().ok();
         }
     }
 
+    /// Reads all configuration (EE) registers from the sensor and returns the current settings as a [`Config`] object.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Result<Config, E>`, where:
+    /// - `Ok(Config)` contains the sensor's configuration data read from the registers.
+    /// - `Err(E)` represents an error encountered during the I2C communication process.
+    ///
+    /// # Operation
+    ///
+    /// - The function begins by enabling the sensor using `en_pin_set`.
+    /// - It then sends a read command to the sensor, targeting the starting address of the EE registers (`MeasurementMode_EE`).
+    /// - After the write command, it reads a series of bytes into a buffer (`buf`), representing the configuration data.
+    /// - The function constructs a `Config` object by deserializing the buffer using `Config::from_bytes` and stores this as the current configuration (`self.config`).
+    /// - Finally, the sensor is disabled using `en_pin_reset`, and the new configuration is returned.
+    ///
+    /// # Notes
+    ///
+    /// - The function reads a fixed 25-byte sequence from the sensor registers, which is expected to match the size required by `Config::from_bytes`.
+    /// - The `en_pin_set` and `en_pin_reset` calls ensure the sensor is active only for the duration of the read operation, optimizing power usage in cases where continuous sensor operation is not required.
     pub fn get_config(&mut self) -> Result<Config, E> {
         let mut buf = [0u8; 25];
 
@@ -415,6 +587,30 @@ where
         Ok(read_config)
     }
 
+    /// Sets configuration values in the sensor’s EE (EEPROM) registers.
+    /// Each register is written only if the provided configuration value differs from the current one.
+    ///
+    /// # Arguments
+    ///
+    /// - `config`: A [`Config`] object containing desired configuration values for the sensor.
+    ///   Fields in `config` that match current register values are ignored to avoid redundant writes.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Result<(), E>`, where `Ok(())` indicates that all configuration settings were applied successfully,
+    /// and `Err(E)` represents an error encountered during communication with the sensor.
+    ///
+    /// # Operation
+    ///
+    /// - The function begins by initializing a small buffer to hold up to 3 bytes per transaction.
+    /// - For each configurable parameter in `config`, it checks whether the new value differs from the current value using `self.is_equal`.
+    /// - If a value differs, it writes the corresponding register address and new value to the sensor using `self.comm.write`.
+    /// - After each write, the buffer is cleared to prepare for the next potential write.
+    ///
+    /// # Notes
+    ///
+    /// This function assumes that the `comm.write` method can handle various data lengths depending on the register type,
+    /// and relies on the `EXPECT_MSG` constant for handling potential buffer overflow errors.
     fn set_config(&mut self, config: Config) -> Result<(), E> {
         let mut vec: Vec<u8, 3> = Vec::new();
 
@@ -510,7 +706,30 @@ where
 
         Ok(())
     }
-
+    /// Executes a background calibration procedure for the sensor.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Result<(), ErrorStatus<E>>`, where `Ok(())` signifies successful calibration,
+    /// and `Err(ErrorStatus::CalibrationError)` indicates that the calibration did not complete successfully.
+    ///
+    /// # Operation
+    ///
+    /// - First, the function enables the sensor using `en_pin_set`.
+    /// - Then, it writes the calibration status and command registers to initiate calibration.
+    /// - If `SingleMeasurementMode` is enabled, the function sets sensor data and waits for `n_rdy_pin` to go low, signaling readiness.
+    /// - It then checks the calibration status register to confirm successful calibration (`0x20`).
+    /// - If calibration fails, the function returns `Err(ErrorStatus::CalibrationError)`.
+    ///
+    /// # Panics
+    ///
+    /// This function will panic if any internal communication call fails unexpectedly. The expected errors
+    /// are handled and returned as `ErrorStatus` variants.
+    ///
+    /// # Notes
+    ///
+    /// This function operates in a blocking manner, especially when `SingleMeasurementMode` is enabled, as it waits for the `n_rdy_pin` to signal readiness.
+    /// Ensure this is acceptable in contexts where non-blocking behavior is essential.
     pub fn background_calibration(&mut self) -> Result<(), ErrorStatus<E>> {
         let mut vec: Vec<u8, 2> = Vec::new();
         let mut buf = [0u8; 1];
@@ -579,12 +798,32 @@ where
         Ok(())
     }
 
+    /// Initializes the sensor with optional configuration and identifies the device type.
+    ///
+    /// # Arguments
+    ///
+    /// - `config_sensor`: An optional [`Config`] parameter that, if provided, configures the sensor settings.
+    ///
+    /// # Returns
+    ///
+    /// Returns `Result<(), E>`, where `Ok(())` indicates successful initialization, and `Err(E)` signifies an error during the process.
+    ///
+    /// # Panics
+    ///
+    /// This function may panic if any of the internal sensor control functions return an error.
+    ///
+    /// # Notes
+    ///
+    /// - The function begins by enabling the sensor, retrieving its current state, and identifying its type.
+    /// - If a configuration is provided, it is applied to the sensor.
+    /// - Finally, the function resets the enable pin, completing the initialization process.
     pub fn init(&mut self, config_sensor: Option<Config>) -> Result<(), E> {
         self.en_pin_set();
-
+        ///set sensor state data
         self.sensor_state_data_get()?;
+        ///
         self.product_type_get()?;
-
+        ///if config is none
         if let Some(config) = config_sensor {
             self.set_config(config)?;
         }
@@ -592,10 +831,51 @@ where
 
         Ok(())
     }
+
+    /// Retrieves information about the sensor's firmware and product type.
+    ///
+    /// This function provides access to the sensor's ID, firmware type,
+    /// firmware revision, and product code if the firmware revision is 4.08
+    /// or later. The returned reference points to the `ProductType` structure
+    /// which holds the relevant information.
+    ///
+    /// # Returns
+    ///
+    /// A reference to `ProductType` that contains:
+    /// - `FirmwareType`: The type of firmware currently used by the sensor.
+    /// - `MainRevision`: The main version of the firmware.
+    /// - `SubRevision`: The sub-version of the firmware.
+    /// - `SensorId`: The unique identifier for the sensor.
+    /// - `ProductCode`: The product code, if applicable.
+    ///
     pub fn fw_info_get(&mut self) -> &ProductType {
         &self.product_type
     }
-
+    /// Initiates a CO2 measurement and retrieves the result.
+    ///
+    /// This function triggers a CO2 measurement process and returns the measurement
+    /// data. It optionally accepts a pressure value to be set before the measurement
+    /// is taken. The function handles sensor state and error management throughout
+    /// the measurement process.
+    ///
+    /// # Arguments
+    ///
+    /// - `pressure`: An optional pressure value (in hPa) to be sent to the sensor.
+    ///   If provided, it must be a 16-bit unsigned integer.
+    ///
+    /// # Returns
+    ///
+    /// Returns a `Result` that contains either:
+    /// - `Ok(Measurement)`: A structure containing the measurement data, parsed
+    ///   from the sensor's response.
+    /// - `Err(ErrorStatus<E>)`: An error status indicating a failure during the
+    ///   measurement process, which could be due to various sensor errors or I2C
+    ///   communication issues.
+    ///
+    /// # Notes
+    ///
+    /// - This function is applicable for both single measurement mode and continuous
+    ///   measurement mode, allowing flexibility in usage depending on the application
     pub fn CO2_measurement_get(
         &mut self,
         pressure: Option<u16>,
@@ -608,7 +888,6 @@ where
         self.sensor_state_data_set().map_err(ErrorStatus::I2c)?;
 
         if let Some(value) = pressure {
-
             self.comm
                 .write(
                     self.address,
@@ -616,10 +895,7 @@ where
                 )
                 .map_err(ErrorStatus::I2c)?;
             self.comm
-                .write(
-                    self.address,
-                    &(value as u16).to_be_bytes(),
-                )
+                .write(self.address, &(value as u16).to_be_bytes())
                 .map_err(ErrorStatus::I2c)?;
         }
 
