@@ -1,4 +1,6 @@
 #![deny(missing_docs)]
+#![no_std]
+
 
 use byteorder::{BigEndian, ByteOrder};
 use core::cell::RefCell;
@@ -98,17 +100,17 @@ impl defmt::Format for ProductType {
 /////////////////////////////////////////////////////////////////
 #[derive(Default, Clone)]
 pub struct Config {
-    pub SingleMeasurementMode: u8,
-    pub MeasurementPeriod: u16,
-    pub NumberOfSamples: u16,
-    pub ABCPeriod: u16,
-    pub ABCTarget: u16,
-    pub IIRFilter: u8,
-    pub MeterControl: u8,
-    pub I2CAddres: u8,
-    pub Nominator: u16,
-    pub Denominator: u16,
-    pub ScaledABCTarget: u16,
+    pub single_measurement_mode: u8,
+    pub measurement_period: u16,
+    pub number_of_samples: u16,
+    pub abc_period: u16,
+    pub abc_target: u16,
+    pub iir_filter: u8,
+    pub meter_control: u8,
+    pub i2c_address: u8,
+    pub nominator: u16,
+    pub denominator: u16,
+    pub scaled_abc_target: u16,
 }
 
 impl core::fmt::Debug for Config {
@@ -116,18 +118,18 @@ impl core::fmt::Debug for Config {
         fmt.debug_struct("Config")
             .field(
                 "SingleMeasurementMode",
-                &format_args!("{:x}", self.SingleMeasurementMode),
+                &format_args!("{:x}", self.single_measurement_mode),
             )
-            .field("MeasurementPeriod", &self.MeasurementPeriod)
-            .field("NumberOfSamples", &self.NumberOfSamples)
-            .field("ABCPeriod", &self.ABCPeriod)
-            .field("ABCTarget", &self.ABCTarget)
-            .field("IIRFilter", &self.IIRFilter)
-            .field("MeterControl", &self.MeterControl)
-            .field("I2CAddres", &self.I2CAddres)
-            .field("Nominator", &self.Nominator)
-            .field("Denominator", &self.Denominator)
-            .field("ScaledABCTarget", &self.ScaledABCTarget)
+            .field("MeasurementPeriod", &self.measurement_period)
+            .field("NumberOfSamples", &self.number_of_samples)
+            .field("ABCPeriod", &self.abc_period)
+            .field("ABCTarget", &self.abc_target)
+            .field("IIRFilter", &self.iir_filter)
+            .field("MeterControl", &self.meter_control)
+            .field("I2CAddres", &self.i2c_address)
+            .field("Nominator", &self.nominator)
+            .field("Denominator", &self.denominator)
+            .field("ScaledABCTarget", &self.scaled_abc_target)
             .finish()
     }
 }
@@ -139,48 +141,48 @@ impl defmt::Format for Config {
         defmt::write!(
             fmt,
             "SingleMeasurementMode: {=u8}, ",
-            self.SingleMeasurementMode
+            self.single_measurement_mode
         );
-        defmt::write!(fmt, "MeasurementPeriod: {=u16}, ", self.MeasurementPeriod);
-        defmt::write!(fmt, "NumberOfSamples: {=u16}, ", self.NumberOfSamples);
-        defmt::write!(fmt, "ABCPeriod: {=u16}, ", self.ABCPeriod);
-        defmt::write!(fmt, "ABCTarget: {=u16}, ", self.ABCTarget);
-        defmt::write!(fmt, "IIRFilter: {=u8}, ", self.IIRFilter);
-        defmt::write!(fmt, "MeterControl: {=u8}, ", self.MeterControl);
-        defmt::write!(fmt, "I2CAddres: {=u8}, ", self.I2CAddres);
-        defmt::write!(fmt, "Nominator: {=u16}, ", self.Nominator);
-        defmt::write!(fmt, "Denominator: {=u16}, ", self.Denominator);
-        defmt::write!(fmt, "ScaledABCTarget: {=u16}", self.ScaledABCTarget);
+        defmt::write!(fmt, "MeasurementPeriod: {=u16}, ", self.measurement_period);
+        defmt::write!(fmt, "NumberOfSamples: {=u16}, ", self.number_of_samples);
+        defmt::write!(fmt, "ABCPeriod: {=u16}, ", self.abc_period);
+        defmt::write!(fmt, "ABCTarget: {=u16}, ", self.abc_target);
+        defmt::write!(fmt, "IIRFilter: {=u8}, ", self.iir_filter);
+        defmt::write!(fmt, "MeterControl: {=u8}, ", self.meter_control);
+        defmt::write!(fmt, "I2CAddress: {=u8}, ", self.i2c_address);
+        defmt::write!(fmt, "Nominator: {=u16}, ", self.nominator);
+        defmt::write!(fmt, "Denominator: {=u16}, ", self.denominator);
+        defmt::write!(fmt, "ScaledABCTarget: {=u16}", self.scaled_abc_target);
         defmt::write!(fmt, " }}");
     }
 }
 
 impl Config {
     fn from_bytes(buf: &[u8; 25]) -> Self {
-        let SingleMeasurementMode = u8::from(buf[0]);
-        let MeasurementPeriod = (u16::from(buf[1]) << 8) | u16::from(buf[2]);
-        let NumberOfSamples = (u16::from(buf[3]) << 8) | u16::from(buf[4]);
-        let ABCPeriod = (u16::from(buf[5]) << 8) | u16::from(buf[6]);
-        let ABCTarget = (u16::from(buf[8]) << 8) | u16::from(buf[9]);
-        let IIRFilter = u8::from(buf[11]);
-        let MeterControl = u8::from(buf[15]);
-        let I2CAddres = u8::from(buf[18]);
-        let Nominator = (u16::from(buf[19]) << 8) | u16::from(buf[20]);
-        let Denominator = (u16::from(buf[21]) << 8) | u16::from(buf[22]);
-        let ScaledABCTarget = (u16::from(buf[23]) << 8) | u16::from(buf[24]);
+        let single_measurement_mode = buf[0];
+        let measurement_period = u16::from_be_bytes([buf[1], buf[2]]);
+        let number_of_samples = u16::from_be_bytes([buf[3], buf[4]]);
+        let abc_period = u16::from_be_bytes([buf[5], buf[6]]);
+        let abc_target = u16::from_be_bytes([buf[8], buf[9]]);
+        let iir_filter = buf[11];
+        let meter_control = buf[15];
+        let i2c_address = buf[18];
+        let nominator = u16::from_be_bytes([buf[19], buf[20]]);
+        let denominator = u16::from_be_bytes([buf[21], buf[22]]);
+        let scaled_abc_target = u16::from_be_bytes([buf[23], buf[24]]);
 
         Self {
-            SingleMeasurementMode,
-            MeasurementPeriod,
-            NumberOfSamples,
-            ABCPeriod,
-            ABCTarget,
-            IIRFilter,
-            MeterControl,
-            I2CAddres,
-            Nominator,
-            Denominator,
-            ScaledABCTarget,
+            single_measurement_mode,
+            measurement_period,
+            number_of_samples,
+            abc_period,
+            abc_target,
+            iir_filter,
+            meter_control,
+            i2c_address,
+            nominator,
+            denominator,
+            scaled_abc_target,
         }
     }
 }
@@ -271,8 +273,8 @@ impl Measurement {
     }
 }
 /////////////////////////////////////////////////////////////////
-pub struct Sunrise<'a, T, D, EN, NRDY> {
-    comm: T,
+pub struct Sunrise<'a, I2C, D, EN, NRDY> {
+    comm: I2C,
     delay: &'a mut D,
     en_pin: Option<EN>,
     n_rdy_pin: NRDY,
@@ -282,9 +284,9 @@ pub struct Sunrise<'a, T, D, EN, NRDY> {
     product_type: ProductType,
 }
 
-impl<'a, T, E, D, EN, NRDY> Sunrise<'a, T, D, EN, NRDY>
+impl<'a, I2C, E, D, EN, NRDY> Sunrise<'a, I2C, D, EN, NRDY>
 where
-    T: Read<Error = E> + Write<Error = E>,
+    I2C: Read<Error = E> + Write<Error = E>,
     D: DelayMs<u32> + 'a,
     EN: OutputPin,
     NRDY: InputPin,
@@ -305,7 +307,7 @@ where
     /// # Returns
     ///
     /// Returns a new `Sunrise` instance, properly initialized and ready for use.
-    pub fn new(i2c: T, delay: &'a mut D, en_pin: Option<EN>, nrdy_pin: NRDY) -> Self {
+    pub fn new(i2c:I2C, delay: &'a mut D, en_pin: Option<EN>, nrdy_pin: NRDY) -> Self {
         Sunrise {
             comm: i2c,
             delay: delay,
@@ -615,90 +617,90 @@ where
         let mut vec: Vec<u8, 3> = Vec::new();
 
         if let false = self.is_equal(
-            config.SingleMeasurementMode,
-            self.config.SingleMeasurementMode,
+            config.single_measurement_mode,
+            self.config.single_measurement_mode,
         ) {
             vec.extend_from_slice(&(Registers::MeterControl_EE as u8).to_be_bytes())
                 .expect(EXPECT_MSG);
-            vec.extend_from_slice(&(config.SingleMeasurementMode as u8).to_be_bytes())
+            vec.extend_from_slice(&(config.single_measurement_mode as u8).to_be_bytes())
                 .expect(EXPECT_MSG);
             self.comm.write(self.address, &vec[0..2])?;
             vec.clear();
         }
-        if let false = self.is_equal(config.MeasurementPeriod, self.config.MeasurementPeriod) {
+        if let false = self.is_equal(config.measurement_period, self.config.measurement_period) {
             vec.extend_from_slice(&(Registers::MeasurementPeriod_EE as u8).to_be_bytes())
                 .expect(EXPECT_MSG);
-            vec.extend_from_slice(&(config.MeasurementPeriod as u16).to_be_bytes())
+            vec.extend_from_slice(&(config.measurement_period as u16).to_be_bytes())
                 .expect(EXPECT_MSG);
             self.comm.write(self.address, &vec)?;
             vec.clear();
         }
-        if let false = self.is_equal(config.ABCPeriod, self.config.ABCPeriod) {
+        if let false = self.is_equal(config.abc_period, self.config.abc_period) {
             vec.extend_from_slice(&(Registers::ABC_Period_EE as u8).to_be_bytes())
                 .expect(EXPECT_MSG);
-            vec.extend_from_slice(&(config.ABCPeriod as u16).to_be_bytes())
+            vec.extend_from_slice(&(config.abc_period as u16).to_be_bytes())
                 .expect(EXPECT_MSG);
             self.comm.write(self.address, &vec)?;
             vec.clear();
         }
-        if let false = self.is_equal(config.ABCTarget, self.config.ABCTarget) {
+        if let false = self.is_equal(config.abc_target, self.config.abc_target) {
             vec.extend_from_slice(&(Registers::ABC_Target_EE as u8).to_be_bytes())
                 .expect(EXPECT_MSG);
-            vec.extend_from_slice(&(config.ABCTarget as u16).to_be_bytes())
+            vec.extend_from_slice(&(config.abc_target as u16).to_be_bytes())
                 .expect(EXPECT_MSG);
             self.comm.write(self.address, &vec)?;
             vec.clear();
         }
 
-        if let false = self.is_equal(config.Denominator, self.config.Denominator) {
+        if let false = self.is_equal(config.denominator, self.config.denominator) {
             vec.extend_from_slice(&(Registers::Denominator_EE as u8).to_be_bytes())
                 .expect(EXPECT_MSG);
-            vec.extend_from_slice(&(config.Denominator as u16).to_be_bytes())
+            vec.extend_from_slice(&(config.denominator as u16).to_be_bytes())
                 .expect(EXPECT_MSG);
             self.comm.write(self.address, &vec)?;
             vec.clear();
         }
 
-        if let false = self.is_equal(config.Nominator, self.config.Nominator) {
+        if let false = self.is_equal(config.nominator, self.config.nominator) {
             vec.extend_from_slice(&(Registers::Nominator_EE as u8).to_be_bytes())
                 .expect(EXPECT_MSG);
-            vec.extend_from_slice(&(config.Nominator as u16).to_be_bytes())
+            vec.extend_from_slice(&(config.nominator as u16).to_be_bytes())
                 .expect(EXPECT_MSG);
             self.comm.write(self.address, &vec)?;
             vec.clear();
         }
 
-        if let false = self.is_equal(config.NumberOfSamples, self.config.NumberOfSamples) {
+        if let false = self.is_equal(config.number_of_samples, self.config.number_of_samples) {
             vec.extend_from_slice(&(Registers::NumberOfSamples_EE as u8).to_be_bytes())
                 .expect(EXPECT_MSG);
-            vec.extend_from_slice(&(config.NumberOfSamples as u16).to_be_bytes())
+            vec.extend_from_slice(&(config.number_of_samples as u16).to_be_bytes())
                 .expect(EXPECT_MSG);
             self.comm.write(self.address, &vec)?;
             vec.clear();
         }
 
-        if let false = self.is_equal(config.ScaledABCTarget, self.config.ScaledABCTarget) {
+        if let false = self.is_equal(config.scaled_abc_target, self.config.scaled_abc_target) {
             vec.extend_from_slice(&(Registers::Scale_ABC_Target as u8).to_be_bytes())
                 .expect(EXPECT_MSG);
-            vec.extend_from_slice(&(config.ScaledABCTarget as u16).to_be_bytes())
+            vec.extend_from_slice(&(config.scaled_abc_target as u16).to_be_bytes())
                 .expect(EXPECT_MSG);
             self.comm.write(self.address, &vec)?;
             vec.clear();
         }
 
-        if let false = self.is_equal(config.I2CAddres, self.config.I2CAddres) {
+        if let false = self.is_equal(config.i2c_address, self.config.i2c_address) {
             vec.extend_from_slice(&(Registers::I2C_Address_EE as u8).to_be_bytes())
                 .expect(EXPECT_MSG);
-            vec.extend_from_slice(&(config.I2CAddres as u16).to_be_bytes())
+            vec.extend_from_slice(&(config.i2c_address as u16).to_be_bytes())
                 .expect(EXPECT_MSG);
             self.comm.write(self.address, &vec)?;
             vec.clear();
         }
 
-        if let false = self.is_equal(config.IIRFilter, self.config.IIRFilter) {
+        if let false = self.is_equal(config.iir_filter, self.config.iir_filter) {
             vec.extend_from_slice(&(Registers::StaticIIRFilter_EE as u8).to_be_bytes())
                 .expect(EXPECT_MSG);
-            vec.extend_from_slice(&(config.IIRFilter as u16).to_be_bytes())
+            vec.extend_from_slice(&(config.iir_filter as u16).to_be_bytes())
                 .expect(EXPECT_MSG);
             self.comm.write(self.address, &vec)?;
             vec.clear();
@@ -753,7 +755,7 @@ where
             .write(self.address, &vec)
             .map_err(ErrorStatus::I2c)?;
 
-        if self.config.SingleMeasurementMode == 0x01 {
+        if self.config.single_measurement_mode == 0x01 {
             self.sensor_state_data_set().map_err(ErrorStatus::I2c)?;
 
             loop {
@@ -776,7 +778,7 @@ where
         self.en_pin_reset();
 
         if let 0x20 = buf[0] {
-            if self.config.SingleMeasurementMode == 0x01 {
+            if self.config.single_measurement_mode == 0x01 {
                 self.sensor_state_data_get().map_err(ErrorStatus::I2c)?;
             }
             return Ok(());
@@ -925,3 +927,4 @@ where
         Ok(Measurement::from_bytes(&buf))
     }
 }
+

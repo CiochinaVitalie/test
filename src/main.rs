@@ -102,7 +102,7 @@ fn main() -> ! {
 
 
     let updated_config = sensor_CO2.get_config().and_then(|mut config| {
-        config.NumberOfSamples = 4;
+        config.number_of_samples = 4;
         Ok(config)  // Возвращаем обновленную конфигурацию
     }).unwrap();
 
