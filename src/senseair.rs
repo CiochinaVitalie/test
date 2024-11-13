@@ -85,7 +85,7 @@ impl core::fmt::Debug for ProductType {
     }
 }
 
-// #[cfg(feature = "defmt")]
+ #[cfg(feature = "defmt")]
 impl defmt::Format for ProductType {
     fn format(&self, fmt: defmt::Formatter) {
         defmt::write!(fmt, "ProductType {{");
@@ -134,7 +134,7 @@ impl core::fmt::Debug for Config {
     }
 }
 
-// #[cfg(feature = "defmt")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for Config {
     fn format(&self, fmt: defmt::Formatter) {
         defmt::write!(fmt, "Config {{");

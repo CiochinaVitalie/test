@@ -13,6 +13,7 @@ use cortex_m::delay::Delay;
 
 use rp_pico::entry;
 use defmt::*;
+use defmt::export::fmt;
 use defmt_rtt as _;
 use embedded_hal::digital::v2::OutputPin;
 use panic_probe as _;
@@ -26,7 +27,7 @@ use rp_pico::hal::{
     clocks::{init_clocks_and_plls, Clock},
     pac,
     I2C,
-    pac::{I2C1,I2C0}, 
+    pac::{I2C1,I2C0},
     sio::Sio,
     watchdog::Watchdog,
     gpio::{FunctionI2C,FunctionI2c,Pin,OutputOverride,PinState,PullUp,PullDown,bank0::{Gpio16,Gpio17,Gpio18,Gpio19,Gpio20,Gpio21},FunctionSio,SioOutput,SioInput},
@@ -77,7 +78,7 @@ fn main() -> ! {
     let scl: Pin<_, FunctionI2C, _> = pins.gpio19.reconfigure();
    
 
-    let i2c =  rp_pico::hal::I2C::i2c1(
+    let mut i2c =  rp_pico::hal::I2C::i2c1(
         pac.I2C1,
         sda,
         scl, // Try `not_an_scl_pin` here
@@ -90,41 +91,51 @@ fn main() -> ! {
     let nrdy_pin =pins.gpio21.into_pull_up_input();
 
     //let mut  test:Option<Sunrise<rp_pico::hal::I2C<pac::I2C1, (Pin<rp_pico::hal::gpio::bank0::Gpio18, rp_pico::hal::gpio::FunctionI2c, rp_pico::hal::gpio::PullUp>, Pin<rp_pico::hal::gpio::bank0::Gpio19, rp_pico::hal::gpio::FunctionI2c, rp_pico::hal::gpio::PullUp>)>, cortex_m::delay::Delay, Pin<rp_pico::hal::gpio::bank0::Gpio20, rp_pico::hal::gpio::FunctionSio<rp_pico::hal::gpio::SioOutput>, rp_pico::hal::gpio::PullDown>, rp_pico::hal::gpio::AsInputPin<rp_pico::hal::gpio::bank0::Gpio21, rp_pico::hal::gpio::FunctionNull, rp_pico::hal::gpio::PullDown>> > = None;
-    let mut  test:Option<Sunrise<I2C<I2C1, (Pin<Gpio18, FunctionI2c, PullUp>, Pin<Gpio19, FunctionI2c, PullUp>)>, Delay, Pin<Gpio20, FunctionSio<SioOutput>, PullDown>, Pin<Gpio21, FunctionSio<SioInput>, PullUp>>> = None;
+    // let mut  test:Option<Sunrise<I2C<I2C1, (Pin<Gpio18, FunctionI2c, PullUp>, Pin<Gpio19, FunctionI2c, PullUp>)>, Delay, Pin<Gpio20, FunctionSio<SioOutput>, PullDown>, Pin<Gpio21, FunctionSio<SioInput>, PullUp>>> = None;
 
-    unsafe {
-        if let Some(delay) = GLOBAL_DELAY.as_mut() {
-            test = Some(Sunrise::new(i2c, delay, Some(en_pin), nrdy_pin));
-        }
-    }
+    // unsafe {
+    //     if let Some(delay) = GLOBAL_DELAY.as_mut() {
+    //         test = Some(Sunrise::new(i2c, delay, Some(en_pin), nrdy_pin));
+    //     }
+    // }
 
-    let mut sensor_CO2 = test.take().unwrap();
-
-
-    let updated_config = sensor_CO2.get_config().and_then(|mut config| {
-        config.number_of_samples = 4;
-        Ok(config)  // Возвращаем обновленную конфигурацию
-    }).unwrap();
+    // let mut sensor_CO2 = test.take().unwrap();
 
 
+    // let updated_config = sensor_CO2.get_config().and_then(|mut config| {
+    //     config.number_of_samples = 4;
+    //     Ok(config)  // Возвращаем обновленную конфигурацию
+    // }).unwrap();
 
-    info!("{:?}", updated_config);
 
-    let gh = sensor_CO2.init(Some(updated_config)).unwrap();
-    let fw_info = sensor_CO2.fw_info_get();
-    info!("{:?}", fw_info);
+
+    // info!("{:?}", updated_config);
+
+    // let gh = sensor_CO2.init(Some(updated_config)).unwrap();
+    // let fw_info = sensor_CO2.fw_info_get();
+    // info!("{:?}", fw_info);
     
     loop {
 
-    let data = sensor_CO2.CO2_measurement_get(None).unwrap();
+    // let data = sensor_CO2.CO2_measurement_get(None).unwrap();
     
-    info!("{:?}",data);
+    // info!("{:?}",data);
     
     unsafe {
         if let Some(delay) = GLOBAL_DELAY.as_mut() {
             delay.delay_ms(60000);
         }
     }
+
+    i2c.write(0x68u8, &(0xFF as u8).to_be_bytes()).unwrap();
+    i2c.write(0x68u8, &(0x08 as u8).to_be_bytes()).unwrap();
+
+    let mut buffer = [0u8; 2];
+match i2c.read(0x68u8, &mut buffer) {
+    Ok(_) => info!("Read success: {:?}", buffer),
+    Err(e) => info!("I2C read error: {:?}", e),
+}
+
     }
 }
 
