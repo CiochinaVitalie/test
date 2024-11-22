@@ -127,14 +127,14 @@ fn main() -> ! {
         }
     }
 
-    i2c.write(0x68u8, &(0xFF as u8).to_be_bytes()).unwrap();
+   let g = i2c.write(0x68u8, &(0xFF as u8).to_be_bytes());
     i2c.write(0x68u8, &(0x08 as u8).to_be_bytes()).unwrap();
 
     let mut buffer = [0u8; 2];
-match i2c.read(0x68u8, &mut buffer) {
-    Ok(_) => info!("Read success: {:?}", buffer),
-    Err(e) => info!("I2C read error: {:?}", e),
-}
+// match i2c.read(0x68u8, &mut buffer) {
+//     Ok(_) => info!("Read success: {:?}", buffer),
+//     // Err(e) => info!("I2C read error: {:?}", e),
+// }
 
     }
 }

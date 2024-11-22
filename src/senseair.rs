@@ -1,12 +1,11 @@
 #![deny(missing_docs)]
 #![no_std]
 
-
 use byteorder::{BigEndian, ByteOrder};
 use core::cell::RefCell;
 use core::str;
 use embedded_hal::blocking::delay::DelayMs;
-use embedded_hal::blocking::i2c::{Read, Write};
+use embedded_hal::blocking::i2c::{Read, Write, WriteRead};
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 
 use heapless::String;
@@ -85,7 +84,7 @@ impl core::fmt::Debug for ProductType {
     }
 }
 
- #[cfg(feature = "defmt")]
+#[cfg(feature = "defmt")]
 impl defmt::Format for ProductType {
     fn format(&self, fmt: defmt::Formatter) {
         defmt::write!(fmt, "ProductType {{");
@@ -286,7 +285,7 @@ pub struct Sunrise<'a, I2C, D, EN, NRDY> {
 
 impl<'a, I2C, E, D, EN, NRDY> Sunrise<'a, I2C, D, EN, NRDY>
 where
-    I2C: Read<Error = E> + Write<Error = E>,
+    I2C: Read<Error = E> + Write<Error = E> + WriteRead<Error = E>,
     D: DelayMs<u32> + 'a,
     EN: OutputPin,
     NRDY: InputPin,
@@ -307,7 +306,7 @@ where
     /// # Returns
     ///
     /// Returns a new `Sunrise` instance, properly initialized and ready for use.
-    pub fn new(i2c:I2C, delay: &'a mut D, en_pin: Option<EN>, nrdy_pin: NRDY) -> Self {
+    pub fn new(i2c: I2C, delay: &'a mut D, en_pin: Option<EN>, nrdy_pin: NRDY) -> Self {
         Sunrise {
             comm: i2c,
             delay: delay,
@@ -345,15 +344,18 @@ where
         let mut buf = [0u8; 18];
         let mut vec: Vec<u8, 11> = Vec::new();
 
+        self.comm.write_read(
+            self.address,
+            &[Registers::FirmwareType as u8],
+            &mut [buf[0]],
+        )?;
+        self.comm.write_read(
+            self.address,
+            &[Registers::FirmwareVer as u8],
+            &mut buf[1..3],
+        )?;
         self.comm
-            .write(self.address, &(Registers::FirmwareType as u8).to_be_bytes())?;
-        self.comm.read(self.address, &mut [buf[0]])?;
-        self.comm
-            .write(self.address, &(Registers::FirmwareVer as u8).to_be_bytes())?;
-        self.comm.read(self.address, &mut buf[1..3])?;
-        self.comm
-            .write(self.address, &(Registers::SensorId as u8).to_be_bytes())?;
-        self.comm.read(self.address, &mut buf[3..7])?;
+            .write_read(self.address, &[Registers::SensorId as u8], &mut buf[3..7])?;
 
         let id = u32::from_be_bytes([buf[3], buf[4], buf[5], buf[6]]);
 
@@ -364,8 +366,8 @@ where
 
         if self.product_type.MainRevision >= 4 && self.product_type.SubRevision >= 8 {
             self.comm
-                .write(self.address, &(Registers::ProductCode as u8).to_be_bytes())?;
-            self.comm.read(self.address, &mut buf[7..])?;
+                .write_read(self.address, &[Registers::ProductCode as u8], &mut buf[7..])?;
+
             vec.extend_from_slice(&buf[7..]).expect(EXPECT_MSG);
             self.product_type.ProductCode = String::from_utf8(vec).unwrap();
         } else {
@@ -451,13 +453,8 @@ where
     /// to continue without being affected by previous error conditions.
     ///
     fn clear_error_status(&mut self) -> Result<(), E> {
-        let mut vec: Vec<u8, 2> = Vec::new();
-        vec.extend_from_slice(&(Registers::ClearErrorStatus as u8).to_be_bytes())
-            .expect(EXPECT_MSG);
-        vec.extend_from_slice(&(0x00 as u8).to_be_bytes())
-            .expect(EXPECT_MSG);
-        self.comm.write(self.address, &vec)?;
-        Ok(())
+        self.comm
+            .write(self.address, &[Registers::ClearErrorStatus as u8, 0x00])
     }
 
     // Initiates a new measurement by sending the start measurement command and transferring the sensor state data
@@ -477,11 +474,10 @@ where
     fn sensor_state_data_set(&mut self) -> Result<(), E> {
         let mut vec: Vec<u8, 26> = Vec::new();
 
-        vec.extend_from_slice(&(Registers::StartMesurement as u8).to_be_bytes())
-            .expect(EXPECT_MSG);
-        vec.extend_from_slice(&(0x01 as u8).to_be_bytes())
+        vec.extend_from_slice(&[Registers::StartMesurement as u8, 0x01])
             .expect(EXPECT_MSG);
         vec.extend_from_slice(&self.state_buf).expect(EXPECT_MSG);
+
         self.comm.write(self.address, &vec)?;
 
         Ok(())
@@ -500,9 +496,11 @@ where
     /// This function is typically called before a measurement operation to ensure that the latest sensor state data is available.
 
     fn sensor_state_data_get(&mut self) -> Result<(), E> {
-        self.comm
-            .write(self.address, &(Registers::AbcTime as u8).to_be_bytes())?;
-        self.comm.read(self.address, &mut self.state_buf)
+        self.comm.write_read(
+            self.address,
+            &[Registers::AbcTime as u8],
+            &mut self.state_buf,
+        )
     }
 
     fn is_equal<F: PartialEq>(&mut self, a: F, b: F) -> bool {
@@ -575,11 +573,11 @@ where
 
         self.en_pin_set();
 
-        self.comm.write(
+        self.comm.write_read(
             self.address,
-            &(Registers::MeasurementMode_EE as u8).to_be_bytes(),
+            &[Registers::MeasurementMode_EE as u8],
+            &mut buf,
         )?;
-        self.comm.read(self.address, &mut buf)?;
 
         let read_config = Config::from_bytes(&buf);
         self.config = read_config.clone();
@@ -620,12 +618,13 @@ where
             config.single_measurement_mode,
             self.config.single_measurement_mode,
         ) {
-            vec.extend_from_slice(&(Registers::MeterControl_EE as u8).to_be_bytes())
-                .expect(EXPECT_MSG);
-            vec.extend_from_slice(&(config.single_measurement_mode as u8).to_be_bytes())
-                .expect(EXPECT_MSG);
-            self.comm.write(self.address, &vec[0..2])?;
-            vec.clear();
+            self.comm.write(
+                self.address,
+                &[
+                    Registers::MeterControl_EE as u8,
+                    config.single_measurement_mode,
+                ],
+            )?;
         }
         if let false = self.is_equal(config.measurement_period, self.config.measurement_period) {
             vec.extend_from_slice(&(Registers::MeasurementPeriod_EE as u8).to_be_bytes())
@@ -655,7 +654,7 @@ where
         if let false = self.is_equal(config.denominator, self.config.denominator) {
             vec.extend_from_slice(&(Registers::Denominator_EE as u8).to_be_bytes())
                 .expect(EXPECT_MSG);
-            vec.extend_from_slice(&(config.denominator as u16).to_be_bytes())
+            vec.extend_from_slice(&(config.denominator).to_be_bytes())
                 .expect(EXPECT_MSG);
             self.comm.write(self.address, &vec)?;
             vec.clear();
@@ -664,7 +663,7 @@ where
         if let false = self.is_equal(config.nominator, self.config.nominator) {
             vec.extend_from_slice(&(Registers::Nominator_EE as u8).to_be_bytes())
                 .expect(EXPECT_MSG);
-            vec.extend_from_slice(&(config.nominator as u16).to_be_bytes())
+            vec.extend_from_slice(&(config.nominator).to_be_bytes())
                 .expect(EXPECT_MSG);
             self.comm.write(self.address, &vec)?;
             vec.clear();
@@ -673,7 +672,7 @@ where
         if let false = self.is_equal(config.number_of_samples, self.config.number_of_samples) {
             vec.extend_from_slice(&(Registers::NumberOfSamples_EE as u8).to_be_bytes())
                 .expect(EXPECT_MSG);
-            vec.extend_from_slice(&(config.number_of_samples as u16).to_be_bytes())
+            vec.extend_from_slice(&(config.number_of_samples).to_be_bytes())
                 .expect(EXPECT_MSG);
             self.comm.write(self.address, &vec)?;
             vec.clear();
@@ -682,28 +681,24 @@ where
         if let false = self.is_equal(config.scaled_abc_target, self.config.scaled_abc_target) {
             vec.extend_from_slice(&(Registers::Scale_ABC_Target as u8).to_be_bytes())
                 .expect(EXPECT_MSG);
-            vec.extend_from_slice(&(config.scaled_abc_target as u16).to_be_bytes())
+            vec.extend_from_slice(&(config.scaled_abc_target).to_be_bytes())
                 .expect(EXPECT_MSG);
             self.comm.write(self.address, &vec)?;
             vec.clear();
         }
 
         if let false = self.is_equal(config.i2c_address, self.config.i2c_address) {
-            vec.extend_from_slice(&(Registers::I2C_Address_EE as u8).to_be_bytes())
-                .expect(EXPECT_MSG);
-            vec.extend_from_slice(&(config.i2c_address as u16).to_be_bytes())
-                .expect(EXPECT_MSG);
-            self.comm.write(self.address, &vec)?;
-            vec.clear();
+            self.comm.write(
+                self.address,
+                &[Registers::I2C_Address_EE as u8, config.i2c_address],
+            )?;
         }
 
         if let false = self.is_equal(config.iir_filter, self.config.iir_filter) {
-            vec.extend_from_slice(&(Registers::StaticIIRFilter_EE as u8).to_be_bytes())
-                .expect(EXPECT_MSG);
-            vec.extend_from_slice(&(config.iir_filter as u16).to_be_bytes())
-                .expect(EXPECT_MSG);
-            self.comm.write(self.address, &vec)?;
-            vec.clear();
+            self.comm.write(
+                self.address,
+                &[Registers::StaticIIRFilter_EE as u8, config.iir_filter],
+            )?;
         }
 
         Ok(())
@@ -733,26 +728,18 @@ where
     /// This function operates in a blocking manner, especially when `SingleMeasurementMode` is enabled, as it waits for the `n_rdy_pin` to signal readiness.
     /// Ensure this is acceptable in contexts where non-blocking behavior is essential.
     pub fn background_calibration(&mut self) -> Result<(), ErrorStatus<E>> {
-        let mut vec: Vec<u8, 2> = Vec::new();
         let mut buf = [0u8; 1];
 
         self.en_pin_set();
 
-        vec.extend_from_slice(&(Registers::CalibrationStatus as u8).to_be_bytes())
-            .expect(EXPECT_MSG);
-        vec.extend_from_slice(&(0x00 as u8).to_be_bytes())
-            .expect(EXPECT_MSG);
         self.comm
-            .write(self.address, &vec)
+            .write(self.address, &[Registers::CalibrationStatus as u8, 0x00])
             .map_err(ErrorStatus::I2c)?;
-        vec.clear();
-
-        vec.extend_from_slice(&(Registers::CalibrationCommand as u8).to_be_bytes())
-            .expect(EXPECT_MSG);
-        vec.extend_from_slice(&(0x07C06 as u16).to_be_bytes())
-            .expect(EXPECT_MSG);
         self.comm
-            .write(self.address, &vec)
+            .write(
+                self.address,
+                &[Registers::CalibrationCommand as u8, 0x07, 0xC6],
+            )
             .map_err(ErrorStatus::I2c)?;
 
         if self.config.single_measurement_mode == 0x01 {
@@ -764,15 +751,12 @@ where
                 }
             }
         }
-
         self.comm
-            .write(
+            .write_read(
                 self.address,
-                &(Registers::CalibrationStatus as u8).to_be_bytes(),
+                &[Registers::CalibrationStatus as u8],
+                &mut buf,
             )
-            .map_err(ErrorStatus::I2c)?;
-        self.comm
-            .read(self.address, &mut buf)
             .map_err(ErrorStatus::I2c)?;
 
         self.en_pin_reset();
@@ -788,13 +772,18 @@ where
     }
 
     pub fn target_calibration(&mut self, value: u16) -> Result<(), E> {
+        
         self.en_pin_set();
+
         self.comm.write(
             self.address,
-            &(Registers::CalibrationTarget as u8).to_be_bytes(),
+            &[
+                Registers::CalibrationTarget as u8,
+                (value >> 8) as u8,
+                (value & 0xFF) as u8,
+            ],
         )?;
-        self.comm
-            .write(self.address, &(value as u16).to_be_bytes())?;
+
         self.en_pin_reset();
 
         Ok(())
@@ -927,4 +916,3 @@ where
         Ok(Measurement::from_bytes(&buf))
     }
 }
-
