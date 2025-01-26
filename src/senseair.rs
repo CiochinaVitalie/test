@@ -14,6 +14,7 @@ use heapless::Vec;
 const EXPECT_MSG: &str = "Vec was not large enough";
 const ADDRESS: u8 = 0x68;
 
+#[derive(Copy, Clone)]
 pub enum Registers {
     ErrorStatus = 0x00,
     MeasuredFilteredPc = 0x06,
@@ -69,7 +70,7 @@ pub struct ProductType {
     MainRevision: u8,
     SubRevision: u8,
     SensorId: u32,
-    ProductCode: String<11>,
+    ProductCode: String<16>,
 }
 
 impl core::fmt::Debug for ProductType {
@@ -319,6 +320,31 @@ where
         }
     }
 
+    fn read_register(&mut self, register: Registers, buf: &mut [u8]) -> Result<(), E> {
+        self.comm
+            .write_read(self.address, &[register as u8], buf)
+            .or_else(|_| self.comm.write_read(self.address, &[register as u8], buf))?;
+        Ok(())
+    }
+
+    fn write_register(&mut self, register: Registers, data: &[u8]) -> Result<(), E> {
+        // Создаем новый heapless::Vec с фиксированным размером (например, 32 байта)
+        let mut buf: Vec<u8, 32> = Vec::new();
+
+        // Пытаемся добавить адрес регистра
+        buf.push(register as u8).expect(EXPECT_MSG);
+
+        // Добавляем данные в буфер
+        buf.extend_from_slice(data).expect(EXPECT_MSG);
+
+        // Отправляем данные через I2C
+        self.comm
+            .write(self.address, &buf)
+            .or_else(|_| self.comm.write(self.address, &buf))?;
+
+        Ok(())
+    }
+
     /// Reads the sensor's ID, firmware type, revision, and product code if the firmware revision is 4.08 or later.
     ///
     /// # Returns
@@ -341,34 +367,21 @@ where
     ///    - Product code (if supported)
     ///
     fn product_type_get(&mut self) -> Result<(), E> {
-        let mut buf = [0u8; 18];
-        let mut vec: Vec<u8, 11> = Vec::new();
+        let mut vec: Vec<u8, 16> = Vec::new();
+        let mut buf = [0u8; 16];
 
-        self.comm.write_read(
-            self.address,
-            &[Registers::FirmwareType as u8],
-            &mut [buf[0]],
-        )?;
-        self.comm.write_read(
-            self.address,
-            &[Registers::FirmwareVer as u8],
-            &mut buf[1..3],
-        )?;
-        self.comm
-            .write_read(self.address, &[Registers::SensorId as u8], &mut buf[3..7])?;
-
-        let id = u32::from_be_bytes([buf[3], buf[4], buf[5], buf[6]]);
-
+        self.read_register(Registers::FirmwareType, &mut buf[..1])?;
         self.product_type.FirmwareType = buf[0];
-        self.product_type.MainRevision = buf[1];
-        self.product_type.SubRevision = buf[2];
-        self.product_type.SensorId = u32::from_be_bytes([buf[3], buf[4], buf[5], buf[6]]);
+
+        self.read_register(Registers::FirmwareVer, &mut buf[..2])?;
+        self.product_type.MainRevision = buf[0];
+        self.product_type.SubRevision = buf[1];
+
+        self.read_register(Registers::SensorId, &mut buf[..4])?;
+        self.product_type.SensorId = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
 
         if self.product_type.MainRevision >= 4 && self.product_type.SubRevision >= 8 {
-            self.comm
-                .write_read(self.address, &[Registers::ProductCode as u8], &mut buf[7..])?;
-
-            vec.extend_from_slice(&buf[7..]).expect(EXPECT_MSG);
+            vec.extend_from_slice(&mut buf).expect(EXPECT_MSG);
             self.product_type.ProductCode = String::from_utf8(vec).unwrap();
         } else {
             self.product_type.ProductCode = String::try_from("No Supporte").unwrap();
@@ -453,8 +466,7 @@ where
     /// to continue without being affected by previous error conditions.
     ///
     fn clear_error_status(&mut self) -> Result<(), E> {
-        self.comm
-            .write(self.address, &[Registers::ClearErrorStatus as u8, 0x00])
+        self.write_register(Registers::ClearErrorStatus, &[0x00u8])
     }
 
     // Initiates a new measurement by sending the start measurement command and transferring the sensor state data
@@ -472,15 +484,9 @@ where
     /// continuity from the previous measurement cycle.
     ///
     fn sensor_state_data_set(&mut self) -> Result<(), E> {
-        let mut vec: Vec<u8, 26> = Vec::new();
 
-        vec.extend_from_slice(&[Registers::StartMesurement as u8, 0x01])
-            .expect(EXPECT_MSG);
-        vec.extend_from_slice(&self.state_buf).expect(EXPECT_MSG);
-
-        self.comm.write(self.address, &vec)?;
-
-        Ok(())
+        let state_buf = self.state_buf;
+        self.write_register(Registers::AbcTime,&state_buf)
     }
 
     /// Reads the sensor's state data from the specified register range (0xC4 - 0xDB) and stores it for use in the next measurement cycle.
@@ -496,11 +502,10 @@ where
     /// This function is typically called before a measurement operation to ensure that the latest sensor state data is available.
 
     fn sensor_state_data_get(&mut self) -> Result<(), E> {
-        self.comm.write_read(
-            self.address,
-            &[Registers::AbcTime as u8],
-            &mut self.state_buf,
-        )
+        let mut state_buf = self.state_buf;
+        self.read_register(Registers::AbcTime, &mut state_buf)?;
+        self.state_buf.copy_from_slice(&state_buf);
+        Ok(())
     }
 
     fn is_equal<F: PartialEq>(&mut self, a: F, b: F) -> bool {
@@ -735,6 +740,7 @@ where
         self.comm
             .write(self.address, &[Registers::CalibrationStatus as u8, 0x00])
             .map_err(ErrorStatus::I2c)?;
+
         self.comm
             .write(
                 self.address,
@@ -772,7 +778,6 @@ where
     }
 
     pub fn target_calibration(&mut self, value: u16) -> Result<(), E> {
-        
         self.en_pin_set();
 
         self.comm.write(
@@ -810,6 +815,7 @@ where
     /// - Finally, the function resets the enable pin, completing the initialization process.
     pub fn init(&mut self, config_sensor: Option<Config>) -> Result<(), E> {
         self.en_pin_set();
+
         ///set sensor state data
         self.sensor_state_data_get()?;
         ///

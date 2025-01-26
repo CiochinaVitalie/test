@@ -7,21 +7,24 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 cortex-m = "0.7"
-cortex-m-rt = "0.7"
+cortex-m-rt = "0.7.5"
 embedded-hal = { version = "0.2.7", features = ["unproven"] }
 
-defmt = { version = "0.3", optional = true }
+defmt = { version = "0.3.10", optional = true }
 defmt-rtt = "0.4"
 panic-probe = { version = "0.3", features = ["print-defmt"] }
 
 # We're using a Pico by default on this template
-rp-pico = "0.9"
+rp-pico = "0.9.0"
 heapless = "0.8.0"
 byteorder = { version = "1", default-features = false }
 sx127x_lora = "0.3.1"
 
+usb-device = "0.3.2"
+usbd-serial = "0.2.2"
+
 [dev-dependencies]
-embedded-hal-mock = { version = "0.11.1", default-features = false, feature = "eh0"}
+embedded-hal-mock = { version = "0.11.1", default-features = false, feature = "eh0" }
 # but you can use any BSP. Uncomment this to use the pro_micro_rp2040 BSP instead
 # sparkfun-pro-micro-rp2040 = "0.8"
 

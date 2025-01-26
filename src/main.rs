@@ -29,6 +29,7 @@ use rp_pico::hal::{
     I2C,
     pac::{I2C1,I2C0},
     sio::Sio,
+    usb::UsbBus,
     watchdog::Watchdog,
     gpio::{FunctionI2C,FunctionI2c,Pin,OutputOverride,PinState,PullUp,PullDown,bank0::{Gpio16,Gpio17,Gpio18,Gpio19,Gpio20,Gpio21},FunctionSio,SioOutput,SioInput},
 };
@@ -37,6 +38,10 @@ use senseair::Sunrise;
 const ADDRESS: u8 = 0x68;
 //static mut GLOBAL_DELAY:Option<cortex_m::delay::Delay> = None;
 static mut GLOBAL_DELAY: Option<Delay> = None;
+
+use usb_device::{prelude::*, bus::UsbBusAllocator,descriptor::DescriptorWriter,device::UsbDeviceBuilder};
+use usbd_serial::{SerialPort, USB_CLASS_CDC};
+
 
 #[entry]
 fn main() -> ! {
@@ -60,6 +65,30 @@ fn main() -> ! {
     .ok()
     .unwrap();
 
+    let usb_bus = UsbBusAllocator::new(UsbBus::new(
+        pac.USBCTRL_REGS,
+        pac.USBCTRL_DPRAM,
+        clocks.usb_clock,
+        true, // Принудительное определение VBUS
+        &mut pac.RESETS,
+    ));
+
+    let mut serial = SerialPort::new(&usb_bus);
+
+    let mut usb_dev = UsbDeviceBuilder::new(&usb_bus, UsbVidPid(0x16c0, 0x27dd))
+    .strings(&[StringDescriptors::default()
+        .manufacturer("Ajaxe")
+        .product("Serial port")
+        .serial_number("TEST")])
+    .unwrap()
+    .device_class(2) // from: https://www.usb.org/defined-class-codes
+    .build();
+    
+    // .device_class(USB_CLASS_CDC)
+    // .product(DescriptorString::new("RP2040 USB Serial"))
+    // .manufacturer(DescriptorString::new("Rust Embedded"))
+    // .serial_number(DescriptorString::new("1234"))
+    // .build();
     //let mut delay = Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
     unsafe{
         GLOBAL_DELAY = Some(Delay::new(core.SYST, clocks.system_clock.freq().to_Hz()));
@@ -126,15 +155,18 @@ fn main() -> ! {
             delay.delay_ms(60000);
         }
     }
-
-   let g = i2c.write(0x68u8, &(0xFF as u8).to_be_bytes());
+if let Err(_) = i2c.write(0x68u8, &(0x08 as u8).to_be_bytes()) {
     i2c.write(0x68u8, &(0x08 as u8).to_be_bytes()).unwrap();
+}
+    
 
     let mut buffer = [0u8; 2];
-// match i2c.read(0x68u8, &mut buffer) {
-//     Ok(_) => info!("Read success: {:?}", buffer),
-//     // Err(e) => info!("I2C read error: {:?}", e),
-// }
+    
+    
+    match i2c.read(0x68u8, &mut buffer) {
+        Ok(_) => info!("Read success: {:?}", buffer),
+        Err(e) => info!("I2C read error: {:?}", defmt::Debug2Format(&e)),
+    }
 
     }
 }
