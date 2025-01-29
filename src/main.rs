@@ -89,10 +89,11 @@ fn main() -> ! {
     // .manufacturer(DescriptorString::new("Rust Embedded"))
     // .serial_number(DescriptorString::new("1234"))
     // .build();
-    //let mut delay = Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
-    unsafe{
-        GLOBAL_DELAY = Some(Delay::new(core.SYST, clocks.system_clock.freq().to_Hz()));
-    }
+    let mut delay = Delay::new(core.SYST, clocks.system_clock.freq().to_Hz());
+    //let mut delay = Mutex::new(RefCell::new(Delay::new( core.SYST, clocks.system_clock.freq().to_Hz())));
+    // unsafe{
+    //     GLOBAL_DELAY = Some(Delay::new(core.SYST, clocks.system_clock.freq().to_Hz()));
+    // }
     
 
     let pins = rp_pico::Pins::new(
@@ -119,7 +120,9 @@ fn main() -> ! {
     let en_pin = pins.gpio20.into_push_pull_output_in_state(PinState::Low);
     let nrdy_pin =pins.gpio21.into_pull_up_input();
 
-    //let mut  test:Option<Sunrise<rp_pico::hal::I2C<pac::I2C1, (Pin<rp_pico::hal::gpio::bank0::Gpio18, rp_pico::hal::gpio::FunctionI2c, rp_pico::hal::gpio::PullUp>, Pin<rp_pico::hal::gpio::bank0::Gpio19, rp_pico::hal::gpio::FunctionI2c, rp_pico::hal::gpio::PullUp>)>, cortex_m::delay::Delay, Pin<rp_pico::hal::gpio::bank0::Gpio20, rp_pico::hal::gpio::FunctionSio<rp_pico::hal::gpio::SioOutput>, rp_pico::hal::gpio::PullDown>, rp_pico::hal::gpio::AsInputPin<rp_pico::hal::gpio::bank0::Gpio21, rp_pico::hal::gpio::FunctionNull, rp_pico::hal::gpio::PullDown>> > = None;
+    let sensor = Sunrise::new(i2c, &mut delay, Some(en_pin), nrdy_pin);
+
+    // let mut  test:Option<Sunrise<rp_pico::hal::I2C<pac::I2C1, (Pin<rp_pico::hal::gpio::bank0::Gpio18, rp_pico::hal::gpio::FunctionI2c, rp_pico::hal::gpio::PullUp>, Pin<rp_pico::hal::gpio::bank0::Gpio19, rp_pico::hal::gpio::FunctionI2c, rp_pico::hal::gpio::PullUp>)>, cortex_m::delay::Delay, Pin<rp_pico::hal::gpio::bank0::Gpio20, rp_pico::hal::gpio::FunctionSio<rp_pico::hal::gpio::SioOutput>, rp_pico::hal::gpio::PullDown>, rp_pico::hal::gpio::AsInputPin<rp_pico::hal::gpio::bank0::Gpio21, rp_pico::hal::gpio::FunctionNull, rp_pico::hal::gpio::PullDown>> > = None;
     // let mut  test:Option<Sunrise<I2C<I2C1, (Pin<Gpio18, FunctionI2c, PullUp>, Pin<Gpio19, FunctionI2c, PullUp>)>, Delay, Pin<Gpio20, FunctionSio<SioOutput>, PullDown>, Pin<Gpio21, FunctionSio<SioInput>, PullUp>>> = None;
 
     // unsafe {
@@ -136,8 +139,6 @@ fn main() -> ! {
     //     Ok(config)  // Возвращаем обновленную конфигурацию
     // }).unwrap();
 
-
-
     // info!("{:?}", updated_config);
 
     // let gh = sensor_CO2.init(Some(updated_config)).unwrap();
@@ -150,23 +151,11 @@ fn main() -> ! {
     
     // info!("{:?}",data);
     
-    unsafe {
-        if let Some(delay) = GLOBAL_DELAY.as_mut() {
-            delay.delay_ms(60000);
-        }
-    }
-if let Err(_) = i2c.write(0x68u8, &(0x08 as u8).to_be_bytes()) {
-    i2c.write(0x68u8, &(0x08 as u8).to_be_bytes()).unwrap();
-}
-    
-
-    let mut buffer = [0u8; 2];
-    
-    
-    match i2c.read(0x68u8, &mut buffer) {
-        Ok(_) => info!("Read success: {:?}", buffer),
-        Err(e) => info!("I2C read error: {:?}", defmt::Debug2Format(&e)),
-    }
+    // unsafe {
+    //     if let Some(delay) = GLOBAL_DELAY.as_mut() {
+    //         delay.delay_ms(60000);
+    //     }
+    // }
 
     }
 }
