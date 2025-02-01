@@ -3,10 +3,10 @@
 
 use byteorder::{BigEndian, ByteOrder};
 use core::cell::RefCell;
-use cortex_m::interrupt::{self, Mutex}; 
 use core::str;
-use embedded_hal::blocking::delay::DelayMs;
 use cortex_m::delay::Delay;
+use cortex_m::interrupt::{self, Mutex};
+use embedded_hal::blocking::delay::DelayMs;
 use embedded_hal::blocking::i2c::{Read, Write, WriteRead};
 use embedded_hal::digital::v2::{InputPin, OutputPin};
 
@@ -17,6 +17,7 @@ const EXPECT_MSG: &str = "Vec was not large enough";
 const ADDRESS: u8 = 0x68;
 
 #[derive(Copy, Clone)]
+#[allow(dead_code)]
 pub enum Registers {
     ErrorStatus = 0x00,
     MeasuredFilteredPc = 0x06,
@@ -33,17 +34,17 @@ pub enum Registers {
     CalibrationStatus = 0x81,
     CalibrationCommand = 0x82,
     CalibrationTarget = 0x84,
-    MeasurementMode_EE = 0x95,
-    MeasurementPeriod_EE = 0x96,
-    NumberOfSamples_EE = 0x98,
-    ABC_Period_EE = 0x9A,
-    ABC_Target_EE = 0x9E,
-    StaticIIRFilter_EE = 0xA1,
-    MeterControl_EE = 0xA5,
-    I2C_Address_EE = 0xA7,
-    Nominator_EE = 0xA8,
-    Denominator_EE = 0xAA,
-    Scale_ABC_Target = 0xB0,
+    MeasurementModeEe = 0x95,
+    MeasurementPeriodEe = 0x96,
+    NumberOfSamplesEe = 0x98,
+    AbcPeriodEe = 0x9A,
+    AbcTargetEe = 0x9E,
+    StaticIIRFilterEe = 0xA1,
+    MeterControlEe = 0xA5,
+    I2cAddressEe = 0xA7,
+    NominatorEe = 0xA8,
+    DenominatorEe = 0xAA,
+    ScaleAbcTarget = 0xB0,
     StartMesurement = 0xC3,
     PressureValue = 0xDC,
     AbcTime = 0xC4,
@@ -66,41 +67,29 @@ pub enum ErrorStatus<E> {
     MemoryError,
     NoMeasurementCompleted,
 }
-#[derive(Default)]
+#[derive(Default, Debug)]
 pub struct ProductType {
-    FirmwareType: u8,
-    MainRevision: u8,
-    SubRevision: u8,
-    SensorId: u32,
-    ProductCode: String<16>,
-}
-
-impl core::fmt::Debug for ProductType {
-    fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        fmt.debug_struct("ProductType")
-            .field("FirmwareType", &self.FirmwareType)
-            .field("MainRevision", &self.MainRevision)
-            .field("SubRevision", &self.SubRevision)
-            .field("SensorId", &self.SensorId)
-            .field("ProductCode", &self.ProductCode)
-            .finish()
-    }
+    firmware_type: u8,
+    main_revision: u8,
+    sub_revision: u8,
+    sensor_id: u32,
+    product_code: String<16>,
 }
 
 #[cfg(feature = "defmt")]
 impl defmt::Format for ProductType {
     fn format(&self, fmt: defmt::Formatter) {
-        defmt::write!(fmt, "ProductType {{");
-        defmt::write!(fmt, "FirmwareType: {=u8}, ", self.FirmwareType);
-        defmt::write!(fmt, "MainRevision: {=u8}, ", self.MainRevision);
-        defmt::write!(fmt, "SubRevision: {=u8}, ", self.SubRevision);
-        defmt::write!(fmt, "SensorId: {=u32}, ", self.SensorId);
-        defmt::write!(fmt, "ProductCode: {}, ", self.ProductCode.as_str());
-        defmt::write!(fmt, " }}");
+        defmt::write!(fmt, "ProductType {{\n");
+        defmt::write!(fmt, "FirmwareType: {=u8},\n ", self.firmware_type);
+        defmt::write!(fmt, "MainRevision: {=u8}, \n", self.main_revision);
+        defmt::write!(fmt, "SubRevision: {=u8}, \n", self.main_revision);
+        defmt::write!(fmt, "SensorId: {=u32}, \n", self.sensor_id);
+        defmt::write!(fmt, "ProductCode: {:?}, \n", self.product_code.as_str());
+        defmt::write!(fmt, " \n}}");
     }
 }
 /////////////////////////////////////////////////////////////////
-#[derive(Default, Clone)]
+#[derive(Default, Clone, Debug, defmt::Format)]
 pub struct Config {
     pub single_measurement_mode: u8,
     pub measurement_period: u16,
@@ -115,141 +104,24 @@ pub struct Config {
     pub scaled_abc_target: u16,
 }
 
-impl core::fmt::Debug for Config {
-    fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        fmt.debug_struct("Config")
-            .field(
-                "SingleMeasurementMode",
-                &format_args!("{:x}", self.single_measurement_mode),
-            )
-            .field("MeasurementPeriod", &self.measurement_period)
-            .field("NumberOfSamples", &self.number_of_samples)
-            .field("ABCPeriod", &self.abc_period)
-            .field("ABCTarget", &self.abc_target)
-            .field("IIRFilter", &self.iir_filter)
-            .field("MeterControl", &self.meter_control)
-            .field("I2CAddres", &self.i2c_address)
-            .field("Nominator", &self.nominator)
-            .field("Denominator", &self.denominator)
-            .field("ScaledABCTarget", &self.scaled_abc_target)
-            .finish()
-    }
-}
-
-#[cfg(feature = "defmt")]
-impl defmt::Format for Config {
-    fn format(&self, fmt: defmt::Formatter) {
-        defmt::write!(fmt, "Config {{");
-        defmt::write!(
-            fmt,
-            "SingleMeasurementMode: {=u8}, ",
-            self.single_measurement_mode
-        );
-        defmt::write!(fmt, "MeasurementPeriod: {=u16}, ", self.measurement_period);
-        defmt::write!(fmt, "NumberOfSamples: {=u16}, ", self.number_of_samples);
-        defmt::write!(fmt, "ABCPeriod: {=u16}, ", self.abc_period);
-        defmt::write!(fmt, "ABCTarget: {=u16}, ", self.abc_target);
-        defmt::write!(fmt, "IIRFilter: {=u8}, ", self.iir_filter);
-        defmt::write!(fmt, "MeterControl: {=u8}, ", self.meter_control);
-        defmt::write!(fmt, "I2CAddress: {=u8}, ", self.i2c_address);
-        defmt::write!(fmt, "Nominator: {=u16}, ", self.nominator);
-        defmt::write!(fmt, "Denominator: {=u16}, ", self.denominator);
-        defmt::write!(fmt, "ScaledABCTarget: {=u16}", self.scaled_abc_target);
-        defmt::write!(fmt, " }}");
-    }
-}
-
-#[derive(PartialEq, Eq, Clone)]
+#[derive(Clone, Debug,Default)]
 pub struct Measurement {
-    MeasuredFilteredPressComp: i16,
-    Temperature: i16,
-    MeasurementCount: u8,
-    MeasurementCycleTime: u16,
-    MeasuredUnfilteredPressComp: i16,
-    MeasuredFiltered: i16,
-    MeasuredUnfiltered: i16,
-    ScaledMeasured: i16,
-    ETC: u32,
-}
-impl core::fmt::Debug for Measurement {
-    fn fmt(&self, fmt: &mut core::fmt::Formatter<'_>) -> core::fmt::Result {
-        fmt.debug_struct("Measurement")
-            .field("MeasuredFilteredPressComp", &self.MeasuredFilteredPressComp)
-            .field("Temperature", &self.Temperature)
-            .field("MeasurementCount", &self.MeasurementCount)
-            .field("MeasurementCycleTime", &self.MeasurementCycleTime)
-            .field(
-                "MeasuredUnfilteredPressComp",
-                &self.MeasuredUnfilteredPressComp,
-            )
-            .field("MeasuredFiltered", &self.MeasuredFiltered)
-            .field("MeasuredUnfiltered", &self.MeasuredUnfiltered)
-            .field("ScaledMeasured", &self.ScaledMeasured)
-            .field("ETC", &self.ETC)
-            .finish()
-    }
-}
-
-// #[cfg(feature = "defmt")]
-impl defmt::Format for Measurement {
-    fn format(&self, fmt: defmt::Formatter) {
-        defmt::write!(fmt, "Measurement {{");
-        defmt::write!(
-            fmt,
-            "MeasuredFilteredPressComp: {=i16}, ",
-            self.MeasuredFilteredPressComp
-        );
-        defmt::write!(fmt, "Temperature: {=i16}, ", self.Temperature);
-        defmt::write!(fmt, "MeasurementCount: {=u8}, ", self.MeasurementCount);
-        defmt::write!(
-            fmt,
-            "MeasurementCycleTime: {=u16}, ",
-            self.MeasurementCycleTime
-        );
-        defmt::write!(
-            fmt,
-            "MeasuredUnfilteredPressComp: {=i16}, ",
-            self.MeasuredUnfilteredPressComp
-        );
-        defmt::write!(fmt, "MeasuredFiltered: {=i16}, ", self.MeasuredFiltered);
-        defmt::write!(fmt, "MeasuredUnfiltered: {=i16}, ", self.MeasuredUnfiltered);
-        defmt::write!(fmt, "ScaledMeasured: {=i16}, ", self.ScaledMeasured);
-        defmt::write!(fmt, "ETC: {=u32}, ", self.ETC);
-
-        defmt::write!(fmt, " }}");
-    }
-}
-impl Measurement {
-    fn from_bytes(buf: &[u8; 28]) -> Self {
-        let MeasuredFilteredPressComp = i16::from_be_bytes([buf[6], buf[7]]);
-        let Temperature = i16::from_be_bytes([buf[8], buf[9]]);
-        let MeasurementCount = buf[13];
-        let MeasurementCycleTime = u16::from_be_bytes([buf[14], buf[15]]);
-        let MeasuredUnfilteredPressComp = i16::from_be_bytes([buf[16], buf[17]]);
-        let MeasuredFiltered = i16::from_be_bytes([buf[18], buf[19]]);
-        let MeasuredUnfiltered = i16::from_be_bytes([buf[20], buf[21]]);
-        let ScaledMeasured = i16::from_be_bytes([buf[22], buf[23]]);
-        let ETC = u32::from_be_bytes([buf[24], buf[25], buf[26], buf[27]]);
-
-        Self {
-            MeasuredFilteredPressComp,
-            Temperature,
-            MeasurementCount,
-            MeasurementCycleTime,
-            MeasuredUnfilteredPressComp,
-            MeasuredFiltered,
-            MeasuredUnfiltered,
-            ScaledMeasured,
-            ETC,
-        }
-    }
+    measured_filtered_press_comp: i16,
+    temperature: i16,
+    measurement_count: u8,
+    measurement_cycle_time: u16,
+    measured_unfiltered_press_comp: i16,
+    measured_filtered: i16,
+    measured_unfiltered: i16,
+    scaled_measured: i16,
+    etc: u32,
 }
 
 pub trait DelayProvider {
     fn delay_ms(&mut self, ms: u32);
 }
 /////////////////////////////////////////////////////////////////
-pub struct Sunrise<'a, I2C,  EN, NRDY> {
+pub struct Sunrise<'a, I2C, EN, NRDY> {
     comm: I2C,
     delay: &'a mut dyn DelayProvider,
     en_pin: Option<EN>,
@@ -258,6 +130,7 @@ pub struct Sunrise<'a, I2C,  EN, NRDY> {
     state_buf: [u8; 24],
     config: Config,
     product_type: ProductType,
+    mesurement: Measurement,
 }
 
 impl<'a, D: DelayMs<u32>> DelayProvider for Mutex<RefCell<D>> {
@@ -281,9 +154,12 @@ where
     EN: OutputPin,
     NRDY: InputPin,
 {
-    
-
-    pub fn new(i2c: I2C, delay: &'a mut dyn DelayProvider, en_pin: Option<EN>, nrdy_pin: NRDY) -> Self {
+    pub fn new(
+        i2c: I2C,
+        delay: &'a mut dyn DelayProvider,
+        en_pin: Option<EN>,
+        nrdy_pin: NRDY,
+    ) -> Self {
         Sunrise {
             comm: i2c,
             delay: delay,
@@ -293,6 +169,7 @@ where
             state_buf: [0x00; 24],
             config: Config::default(),
             product_type: ProductType::default(),
+            mesurement: Measurement::default(),
         }
     }
 
@@ -327,20 +204,20 @@ where
         let mut buf = [0u8; 16];
 
         self.read_register(Registers::FirmwareType, &mut buf[..1])?;
-        self.product_type.FirmwareType = buf[0];
+        self.product_type.firmware_type = buf[0];
 
         self.read_register(Registers::FirmwareVer, &mut buf[..2])?;
-        self.product_type.MainRevision = buf[0];
-        self.product_type.SubRevision = buf[1];
+        self.product_type.main_revision = buf[0];
+        self.product_type.sub_revision = buf[1];
 
         self.read_register(Registers::SensorId, &mut buf[..4])?;
-        self.product_type.SensorId = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
+        self.product_type.sensor_id = u32::from_be_bytes([buf[0], buf[1], buf[2], buf[3]]);
 
-        if self.product_type.MainRevision >= 4 && self.product_type.SubRevision >= 8 {
+        if self.product_type.main_revision >= 4 && self.product_type.sub_revision >= 8 {
             vec.extend_from_slice(&mut buf).expect(EXPECT_MSG);
-            self.product_type.ProductCode = String::from_utf8(vec).unwrap();
+            self.product_type.product_code = String::from_utf8(vec).unwrap();
         } else {
-            self.product_type.ProductCode = String::try_from("No Supporte").unwrap();
+            self.product_type.product_code = String::try_from("No Supporte").unwrap();
         }
 
         Ok(())
@@ -406,30 +283,27 @@ where
     pub fn get_config(&mut self) -> Result<Config, E> {
         let mut buf = [0u8; 2];
 
-        self.read_register(
-            Registers::MeasurementMode_EE,
-            &mut buf,
-        )?;
+        self.read_register(Registers::MeasurementModeEe, &mut buf)?;
         self.config.single_measurement_mode = buf[0];
-        self.read_register(Registers::MeasurementPeriod_EE, &mut buf)?;
+        self.read_register(Registers::MeasurementPeriodEe, &mut buf)?;
         self.config.measurement_period = u16::from_be_bytes([buf[0], buf[1]]);
-        self.read_register(Registers::NumberOfSamples_EE, &mut buf)?;
+        self.read_register(Registers::NumberOfSamplesEe, &mut buf)?;
         self.config.number_of_samples = u16::from_be_bytes([buf[0], buf[1]]);
-        self.read_register(Registers::ABC_Period_EE, &mut buf)?;
+        self.read_register(Registers::AbcPeriodEe, &mut buf)?;
         self.config.abc_period = u16::from_be_bytes([buf[0], buf[1]]);
-        self.read_register(Registers::ABC_Target_EE, &mut buf)?;
+        self.read_register(Registers::AbcTargetEe, &mut buf)?;
         self.config.abc_target = u16::from_be_bytes([buf[0], buf[1]]);
-        self.read_register(Registers::StaticIIRFilter_EE, &mut buf)?;
+        self.read_register(Registers::StaticIIRFilterEe, &mut buf)?;
         self.config.iir_filter = buf[0];
-        self.read_register(Registers::MeterControl_EE, &mut buf)?;
+        self.read_register(Registers::MeterControlEe, &mut buf)?;
         self.config.meter_control = buf[0];
-        self.read_register(Registers::I2C_Address_EE, &mut buf)?;
+        self.read_register(Registers::I2cAddressEe, &mut buf)?;
         self.config.i2c_address = buf[0];
-        self.read_register(Registers::Nominator_EE, &mut buf)?;
+        self.read_register(Registers::NominatorEe, &mut buf)?;
         self.config.nominator = u16::from_be_bytes([buf[0], buf[1]]);
-        self.read_register(Registers::Denominator_EE, &mut buf)?;
+        self.read_register(Registers::DenominatorEe, &mut buf)?;
         self.config.denominator = u16::from_be_bytes([buf[0], buf[1]]);
-        self.read_register(Registers::Scale_ABC_Target, &mut buf)?;
+        self.read_register(Registers::ScaleAbcTarget, &mut buf)?;
         self.config.scaled_abc_target = u16::from_be_bytes([buf[0], buf[1]]);
 
         let read_config = self.config.clone();
@@ -445,65 +319,59 @@ where
             config.single_measurement_mode,
             self.config.single_measurement_mode,
         ) {
-            self.write_register(
-                Registers::MeterControl_EE,
-                &[config.single_measurement_mode],
-            )?;
+            self.write_register(Registers::MeterControlEe, &[config.single_measurement_mode])?;
         }
         if let false = self.is_equal(config.measurement_period, self.config.measurement_period) {
             self.write_register(
-                Registers::MeasurementPeriod_EE,
+                Registers::MeasurementPeriodEe,
                 &config.measurement_period.to_be_bytes(),
             )?;
         }
         if let false = self.is_equal(config.abc_period, self.config.abc_period) {
-            self.write_register(Registers::ABC_Period_EE, &config.abc_period.to_be_bytes())?;
+            self.write_register(Registers::AbcPeriodEe, &config.abc_period.to_be_bytes())?;
         }
         if let false = self.is_equal(config.abc_target, self.config.abc_target) {
-            self.write_register(Registers::ABC_Target_EE, &config.abc_target.to_be_bytes())?;
+            self.write_register(Registers::AbcTargetEe, &config.abc_target.to_be_bytes())?;
         }
 
         if let false = self.is_equal(config.denominator, self.config.denominator) {
-            self.write_register(Registers::Denominator_EE, &config.denominator.to_be_bytes())?;
+            self.write_register(Registers::DenominatorEe, &config.denominator.to_be_bytes())?;
         }
 
         if let false = self.is_equal(config.nominator, self.config.nominator) {
-            self.write_register(Registers::Nominator_EE, &config.nominator.to_be_bytes())?;
+            self.write_register(Registers::NominatorEe, &config.nominator.to_be_bytes())?;
         }
 
         if let false = self.is_equal(config.number_of_samples, self.config.number_of_samples) {
             self.write_register(
-                Registers::NumberOfSamples_EE,
+                Registers::NumberOfSamplesEe,
                 &config.number_of_samples.to_be_bytes(),
             )?;
         }
 
         if let false = self.is_equal(config.scaled_abc_target, self.config.scaled_abc_target) {
             self.write_register(
-                Registers::Scale_ABC_Target,
+                Registers::ScaleAbcTarget,
                 &config.scaled_abc_target.to_be_bytes(),
             )?;
         }
 
         if let false = self.is_equal(config.i2c_address, self.config.i2c_address) {
-            self.write_register(Registers::I2C_Address_EE, &[config.i2c_address])?;
+            self.write_register(Registers::I2cAddressEe, &[config.i2c_address])?;
         }
 
         if let false = self.is_equal(config.iir_filter, self.config.iir_filter) {
-            self.write_register(Registers::StaticIIRFilter_EE, &[config.iir_filter])?;
+            self.write_register(Registers::StaticIIRFilterEe, &[config.iir_filter])?;
         }
 
         Ok(())
     }
 
-    
     pub fn background_calibration(&mut self) -> Result<(), ErrorStatus<E>> {
-
         let mut buf = [0u8; 1];
 
         self.write_register(Registers::CalibrationStatus, &[0x00])
             .map_err(ErrorStatus::I2c)?;
-
 
         self.write_register(Registers::CalibrationCommand, &[0x07, 0xC6])
             .map_err(ErrorStatus::I2c)?;
@@ -533,7 +401,6 @@ where
 
     /// Sets the target calibration value for the sensor.
     pub fn target_calibration(&mut self, value: u16) -> Result<(), E> {
-
         self.write_register(Registers::CalibrationTarget, &value.to_be_bytes())?;
 
         Ok(())
@@ -541,7 +408,6 @@ where
 
     /// Initiates a CO2 measurement and retrieves the result.
     pub fn init(&mut self, config_sensor: Option<Config>) -> Result<(), E> {
-
         ///set sensor state data
         self.sensor_state_data_get()?;
         ///
@@ -559,8 +425,8 @@ where
     pub fn CO2_measurement_get(
         &mut self,
         pressure: Option<u16>,
-    ) -> Result<Measurement, ErrorStatus<E>> {
-        let mut buf = [0u8; 28];
+    ) -> Result<&Measurement, ErrorStatus<E>> {
+        let mut buf = [0u8; 2];
 
         self.clear_error_status().map_err(ErrorStatus::I2c)?;
         self.sensor_state_data_set().map_err(ErrorStatus::I2c)?;
@@ -576,21 +442,49 @@ where
             }
         }
 
-        // self.comm
-        //     .write(self.address, &(Registers::ErrorStatus as u8).to_be_bytes())
-        //     .map_err(ErrorStatus::I2c)?;
-        self.read_register(Registers::ErrorStatus, &mut buf[..2])
-            .map_err(ErrorStatus::I2c)?;
-
-        self.sensor_state_data_get().map_err(ErrorStatus::I2c)?;
-
-
         let sensor_err = u16::from_be_bytes([buf[0], buf[1]]);
 
         if let Some(err) = self.check_sensor_error(sensor_err) {
             return Err(err);
         }
 
-        Ok(Measurement::from_bytes(&buf))
+        self.read_register(Registers::ErrorStatus, &mut buf[..2])
+            .map_err(ErrorStatus::I2c)?;
+
+        self.read_register(Registers::MeasuredFilteredPc, &mut buf).map_err(ErrorStatus::I2c)?;
+        self.mesurement.measured_filtered_press_comp = i16::from_be_bytes([buf[0], buf[1]]);
+
+        self.read_register(Registers::Temperature, &mut buf).map_err(ErrorStatus::I2c)?;
+        self.mesurement.temperature = i16::from_be_bytes([buf[0], buf[1]]);
+
+        self.read_register(Registers::MeasurementCount, &mut buf)
+            .map_err(ErrorStatus::I2c)?;
+        self.mesurement.measurement_count = buf[0];
+
+        self.read_register(Registers::MeasurCycleTime, &mut buf)
+            .map_err(ErrorStatus::I2c)?;
+
+        self.mesurement.measurement_cycle_time = u16::from_be_bytes([buf[0], buf[1]]);
+
+        self.read_register(Registers::MeasUnfPressCompens, &mut buf)
+            .map_err(ErrorStatus::I2c)?;
+
+        self.mesurement.measured_unfiltered_press_comp = i16::from_be_bytes([buf[0], buf[1]]);
+
+        self.read_register(Registers::MeasFilPressCompens, &mut buf)
+            .map_err(ErrorStatus::I2c)?;
+
+        self.mesurement.measured_filtered = i16::from_be_bytes([buf[0], buf[1]]);
+
+        self.read_register(Registers::MeasuredUnfiltered, &mut buf)
+            .map_err(ErrorStatus::I2c)?;
+
+        self.mesurement.measured_unfiltered = i16::from_be_bytes([buf[0], buf[1]]); 
+
+
+        self.sensor_state_data_get().map_err(ErrorStatus::I2c)?;
+
+
+        Ok(&self.mesurement)
     }
 }

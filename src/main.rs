@@ -140,7 +140,7 @@ fn main() -> ! {
     // }).unwrap();
     let read_config = sensor_CO2.get_config().unwrap();
 
-    info!("{:?}", read_config);
+    //info!("{:?}", read_config);
 
     // let gh = sensor_CO2.init(Some(updated_config)).unwrap();
     // let fw_info = sensor_CO2.fw_info_get();
