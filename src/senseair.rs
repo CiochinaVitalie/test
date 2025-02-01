@@ -408,8 +408,9 @@ where
 
         self.read_register(
             Registers::MeasurementMode_EE,
-            &mut [self.config.single_measurement_mode],
+            &mut buf,
         )?;
+        self.config.single_measurement_mode = buf[0];
         self.read_register(Registers::MeasurementPeriod_EE, &mut buf)?;
         self.config.measurement_period = u16::from_be_bytes([buf[0], buf[1]]);
         self.read_register(Registers::NumberOfSamples_EE, &mut buf)?;
@@ -418,9 +419,12 @@ where
         self.config.abc_period = u16::from_be_bytes([buf[0], buf[1]]);
         self.read_register(Registers::ABC_Target_EE, &mut buf)?;
         self.config.abc_target = u16::from_be_bytes([buf[0], buf[1]]);
-        self.read_register(Registers::StaticIIRFilter_EE, &mut [self.config.iir_filter])?;
-        self.read_register(Registers::MeterControl_EE, &mut [self.config.meter_control])?;
-        self.read_register(Registers::I2C_Address_EE, &mut [self.config.i2c_address])?;
+        self.read_register(Registers::StaticIIRFilter_EE, &mut buf)?;
+        self.config.iir_filter = buf[0];
+        self.read_register(Registers::MeterControl_EE, &mut buf)?;
+        self.config.meter_control = buf[0];
+        self.read_register(Registers::I2C_Address_EE, &mut buf)?;
+        self.config.i2c_address = buf[0];
         self.read_register(Registers::Nominator_EE, &mut buf)?;
         self.config.nominator = u16::from_be_bytes([buf[0], buf[1]]);
         self.read_register(Registers::Denominator_EE, &mut buf)?;

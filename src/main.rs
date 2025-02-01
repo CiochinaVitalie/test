@@ -120,7 +120,7 @@ fn main() -> ! {
     let en_pin = pins.gpio20.into_push_pull_output_in_state(PinState::Low);
     let nrdy_pin =pins.gpio21.into_pull_up_input();
 
-    let sensor = Sunrise::new(i2c, &mut delay, Some(en_pin), nrdy_pin);
+    let mut sensor_CO2 = Sunrise::new(i2c, &mut delay, Some(en_pin), nrdy_pin);
 
     // let mut  test:Option<Sunrise<rp_pico::hal::I2C<pac::I2C1, (Pin<rp_pico::hal::gpio::bank0::Gpio18, rp_pico::hal::gpio::FunctionI2c, rp_pico::hal::gpio::PullUp>, Pin<rp_pico::hal::gpio::bank0::Gpio19, rp_pico::hal::gpio::FunctionI2c, rp_pico::hal::gpio::PullUp>)>, cortex_m::delay::Delay, Pin<rp_pico::hal::gpio::bank0::Gpio20, rp_pico::hal::gpio::FunctionSio<rp_pico::hal::gpio::SioOutput>, rp_pico::hal::gpio::PullDown>, rp_pico::hal::gpio::AsInputPin<rp_pico::hal::gpio::bank0::Gpio21, rp_pico::hal::gpio::FunctionNull, rp_pico::hal::gpio::PullDown>> > = None;
     // let mut  test:Option<Sunrise<I2C<I2C1, (Pin<Gpio18, FunctionI2c, PullUp>, Pin<Gpio19, FunctionI2c, PullUp>)>, Delay, Pin<Gpio20, FunctionSio<SioOutput>, PullDown>, Pin<Gpio21, FunctionSio<SioInput>, PullUp>>> = None;
@@ -138,8 +138,9 @@ fn main() -> ! {
     //     config.number_of_samples = 4;
     //     Ok(config)  // Возвращаем обновленную конфигурацию
     // }).unwrap();
+    let read_config = sensor_CO2.get_config().unwrap();
 
-    // info!("{:?}", updated_config);
+    info!("{:?}", read_config);
 
     // let gh = sensor_CO2.init(Some(updated_config)).unwrap();
     // let fw_info = sensor_CO2.fw_info_get();
