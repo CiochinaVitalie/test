@@ -2,6 +2,8 @@
 #![no_std]
 
 use byteorder::{BigEndian, ByteOrder};
+use rp_pico::pac::adc::cs::R;
+use sx127x_lora::RadioMode;
 use core::cell::RefCell;
 use core::str;
 use cortex_m::delay::Delay;
@@ -15,6 +17,9 @@ use heapless::Vec;
 
 const EXPECT_MSG: &str = "Vec was not large enough";
 const ADDRESS: u8 = 0x68;
+const RAM_DELAY: u32 = 1;
+const EEPROM_DELAY: u32 = 25;
+const NO_DELAY: u32 = 0;
 
 #[derive(Copy, Clone)]
 #[allow(dead_code)]
@@ -76,6 +81,7 @@ pub struct ProductType {
     product_code: String<16>,
 }
 
+
 #[cfg(feature = "defmt")]
 impl defmt::Format for ProductType {
     fn format(&self, fmt: defmt::Formatter) {
@@ -104,7 +110,23 @@ pub struct Config {
     pub scaled_abc_target: u16,
 }
 
-#[derive(Clone, Debug,Default)]
+#[derive(Debug,Default, defmt::Format)]
+pub struct SetData {
+    abc_time:u16,
+    abc_par0:u16,
+    abc_par1:u16,
+    abc_par2:u16,
+    abc_par3:u16,
+    filter_par0:u16,
+    filter_par1:u16,
+    filter_par2:u16,
+    filter_par3:u16,
+    filter_par4:u16,
+    filter_par5:u16,
+    filter_par6:u16,
+}
+
+#[derive(Clone, Debug,Default, defmt::Format)]
 pub struct Measurement {
     measured_filtered_press_comp: i16,
     temperature: i16,
@@ -131,6 +153,7 @@ pub struct Sunrise<'a, I2C, EN, NRDY> {
     config: Config,
     product_type: ProductType,
     mesurement: Measurement,
+    set_data: SetData,
 }
 
 impl<'a, D: DelayMs<u32>> DelayProvider for Mutex<RefCell<D>> {
@@ -170,7 +193,11 @@ where
             config: Config::default(),
             product_type: ProductType::default(),
             mesurement: Measurement::default(),
+            set_data: SetData::default(),
         }
+    }
+    pub fn delay_ms(&mut self, ms: u32) {
+        self.delay.delay_ms(ms);
     }
 
     fn read_register(&mut self, register: Registers, buf: &mut [u8]) -> Result<(), E> {
@@ -180,7 +207,7 @@ where
         Ok(())
     }
 
-    fn write_register(&mut self, register: Registers, data: &[u8]) -> Result<(), E> {
+    fn write_register(&mut self, register: Registers, data: &[u8],delay:u32) -> Result<(), E> {
         // Создаем новый heapless::Vec с фиксированным размером (например, 32 байта)
         let mut buf: Vec<u8, 32> = Vec::new();
 
@@ -194,6 +221,8 @@ where
         self.comm
             .write(self.address, &buf)
             .or_else(|_| self.comm.write(self.address, &buf))?;
+
+        self.delay_ms(delay);
 
         Ok(())
     }
@@ -244,7 +273,7 @@ where
 
     /// Clears the sensor's error status register.  
     fn clear_error_status(&mut self) -> Result<(), E> {
-        self.write_register(Registers::ClearErrorStatus, &[0x00u8])
+        self.write_register(Registers::ClearErrorStatus, &[0x00u8],RAM_DELAY)
     }
 
     /// Sets the sensor's measurement mode to single measurement mode.
@@ -319,49 +348,49 @@ where
             config.single_measurement_mode,
             self.config.single_measurement_mode,
         ) {
-            self.write_register(Registers::MeterControlEe, &[config.single_measurement_mode])?;
+            self.write_register(Registers::MeterControlEe, &[config.single_measurement_mode],EEPROM_DELAY)?;
         }
         if let false = self.is_equal(config.measurement_period, self.config.measurement_period) {
             self.write_register(
                 Registers::MeasurementPeriodEe,
-                &config.measurement_period.to_be_bytes(),
+                &config.measurement_period.to_be_bytes(), EEPROM_DELAY
             )?;
         }
         if let false = self.is_equal(config.abc_period, self.config.abc_period) {
-            self.write_register(Registers::AbcPeriodEe, &config.abc_period.to_be_bytes())?;
+            self.write_register(Registers::AbcPeriodEe, &config.abc_period.to_be_bytes(), EEPROM_DELAY)?;
         }
         if let false = self.is_equal(config.abc_target, self.config.abc_target) {
-            self.write_register(Registers::AbcTargetEe, &config.abc_target.to_be_bytes())?;
+            self.write_register(Registers::AbcTargetEe, &config.abc_target.to_be_bytes(), EEPROM_DELAY)?;
         }
 
         if let false = self.is_equal(config.denominator, self.config.denominator) {
-            self.write_register(Registers::DenominatorEe, &config.denominator.to_be_bytes())?;
+            self.write_register(Registers::DenominatorEe, &config.denominator.to_be_bytes(),EEPROM_DELAY)?;
         }
 
         if let false = self.is_equal(config.nominator, self.config.nominator) {
-            self.write_register(Registers::NominatorEe, &config.nominator.to_be_bytes())?;
+            self.write_register(Registers::NominatorEe, &config.nominator.to_be_bytes(),EEPROM_DELAY)?;
         }
 
         if let false = self.is_equal(config.number_of_samples, self.config.number_of_samples) {
             self.write_register(
                 Registers::NumberOfSamplesEe,
-                &config.number_of_samples.to_be_bytes(),
+                &config.number_of_samples.to_be_bytes(),EEPROM_DELAY
             )?;
         }
 
         if let false = self.is_equal(config.scaled_abc_target, self.config.scaled_abc_target) {
             self.write_register(
                 Registers::ScaleAbcTarget,
-                &config.scaled_abc_target.to_be_bytes(),
+                &config.scaled_abc_target.to_be_bytes(),EEPROM_DELAY
             )?;
         }
 
         if let false = self.is_equal(config.i2c_address, self.config.i2c_address) {
-            self.write_register(Registers::I2cAddressEe, &[config.i2c_address])?;
+            self.write_register(Registers::I2cAddressEe, &[config.i2c_address],EEPROM_DELAY)?;
         }
 
         if let false = self.is_equal(config.iir_filter, self.config.iir_filter) {
-            self.write_register(Registers::StaticIIRFilterEe, &[config.iir_filter])?;
+            self.write_register(Registers::StaticIIRFilterEe, &[config.iir_filter],EEPROM_DELAY)?;
         }
 
         Ok(())
@@ -370,10 +399,10 @@ where
     pub fn background_calibration(&mut self) -> Result<(), ErrorStatus<E>> {
         let mut buf = [0u8; 1];
 
-        self.write_register(Registers::CalibrationStatus, &[0x00])
+        self.write_register(Registers::CalibrationStatus, &[0x00],RAM_DELAY)
             .map_err(ErrorStatus::I2c)?;
 
-        self.write_register(Registers::CalibrationCommand, &[0x07, 0xC6])
+        self.write_register(Registers::CalibrationCommand, &[0x07, 0xC6],RAM_DELAY)
             .map_err(ErrorStatus::I2c)?;
 
         if self.config.single_measurement_mode == 0x01 {
@@ -401,7 +430,7 @@ where
 
     /// Sets the target calibration value for the sensor.
     pub fn target_calibration(&mut self, value: u16) -> Result<(), E> {
-        self.write_register(Registers::CalibrationTarget, &value.to_be_bytes())?;
+        self.write_register(Registers::CalibrationTarget, &value.to_be_bytes(), RAM_DELAY)?;
 
         Ok(())
     }
@@ -411,8 +440,8 @@ where
         ///set sensor state data
         self.sensor_state_data_get()?;
         ///
-        self.product_type_get()?;
-        self.get_config()?;
+        // self.product_type_get()?;
+        // self.get_config()?;
         ///if config is none
         if let Some(config) = config_sensor {
             self.set_config(config)?;
@@ -432,15 +461,16 @@ where
         self.sensor_state_data_set().map_err(ErrorStatus::I2c)?;
 
         if let Some(value) = pressure {
-            self.write_register(Registers::PressureValue, &value.to_be_bytes())
+            self.write_register(Registers::PressureValue, &value.to_be_bytes(),RAM_DELAY)
                 .map_err(ErrorStatus::I2c)?;
         }
 
-        loop {
-            if let Ok(true) = self.n_rdy_pin.is_low() {
-                break;
-            }
-        }
+        // loop {
+        //     if let Ok(true) = self.n_rdy_pin.is_low() {
+        //         break;
+        //     }
+        // }
+        self.delay.delay_ms(2400);
 
         let sensor_err = u16::from_be_bytes([buf[0], buf[1]]);
 

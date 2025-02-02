@@ -138,19 +138,34 @@ fn main() -> ! {
     //     config.number_of_samples = 4;
     //     Ok(config)  // Возвращаем обновленную конфигурацию
     // }).unwrap();
-    let read_config = sensor_CO2.get_config().unwrap();
+    //let read_config = sensor_CO2.get_config().unwrap();
 
     //info!("{:?}", read_config);
 
     // let gh = sensor_CO2.init(Some(updated_config)).unwrap();
     // let fw_info = sensor_CO2.fw_info_get();
     // info!("{:?}", fw_info);
+    sensor_CO2.init(None).unwrap();
+    let data = sensor_CO2.CO2_measurement_get(None);
+    match data {
+        Ok(data) => {
+            info!("{:?}",data);
+        },
+        Err(e) => {
+            info!("{:?}", defmt::Debug2Format(&e));
+        }
+        
+    }
+    //info!("{:?}",data);
     
     loop {
 
-    // let data = sensor_CO2.CO2_measurement_get(None).unwrap();
+    //sensor_CO2.delay_ms(60000);
     
-    // info!("{:?}",data);
+    
+    
+    
+
     
     // unsafe {
     //     if let Some(delay) = GLOBAL_DELAY.as_mut() {
