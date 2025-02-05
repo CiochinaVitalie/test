@@ -53,6 +53,17 @@ pub enum Registers {
     StartMesurement = 0xC3,
     PressureValue = 0xDC,
     AbcTime = 0xC4,
+    AbcPar0 = 0xC6,
+    AbcPar1 = 0xC8,
+    AbcPar2 = 0xCA,
+    AbcPar3 = 0xCC,
+    FilterPar0 = 0xCE,
+    FilterPar1 = 0xD0,
+    FilterPar2 = 0xD2,
+    FilterPar3 = 0xD4,
+    FilterPar4 = 0xD6,
+    FilterPar5 = 0xD8,
+    FilterPar6 = 0xDA,
     ClearErrorStatus = 0x9D,
 }
 
@@ -278,16 +289,50 @@ where
 
     /// Sets the sensor's measurement mode to single measurement mode.
     fn sensor_state_data_set(&mut self) -> Result<(), E> {
-        let state_buf = self.state_buf.clone();
-        self.write_register(Registers::AbcTime, &state_buf)
+  
+        self.write_register(Registers::AbcTime, &mut self.set_data.abc_time.to_be_bytes(),RAM_DELAY)?;
+        self.write_register(Registers::AbcPar0, &mut self.set_data.abc_par0.to_be_bytes(),RAM_DELAY)?;
+        self.write_register(Registers::AbcPar1, &mut self.set_data.abc_par1.to_be_bytes(),RAM_DELAY)?;
+        self.write_register(Registers::AbcPar2, &mut self.set_data.abc_par2.to_be_bytes(),RAM_DELAY)?;
+        self.write_register(Registers::AbcPar3, &mut self.set_data.abc_par3.to_be_bytes(),RAM_DELAY)?;
+        self.write_register(Registers::FilterPar0, &mut self.set_data.filter_par0.to_be_bytes(),RAM_DELAY)?;
+        self.write_register(Registers::FilterPar1, &mut self.set_data.filter_par1.to_be_bytes(),RAM_DELAY)?;
+        self.write_register(Registers::FilterPar2, &mut self.set_data.filter_par2.to_be_bytes(),RAM_DELAY)?;
+        self.write_register(Registers::FilterPar3, &mut self.set_data.filter_par3.to_be_bytes(),RAM_DELAY)?;
+        self.write_register(Registers::FilterPar4, &mut self.set_data.filter_par4.to_be_bytes(),RAM_DELAY)?;
+        self.write_register(Registers::FilterPar5, &mut self.set_data.filter_par5.to_be_bytes(),RAM_DELAY)?;
+        self.write_register(Registers::FilterPar6, &mut self.set_data.filter_par6.to_be_bytes(),RAM_DELAY)?;
+        Ok(())
     }
 
     /// Retrieves the sensor's state data from the sensor's registers.
     fn sensor_state_data_get(&mut self) -> Result<(), E> {
-        let mut state_buf: [u8; 24] = [0; 24];
+        let mut state_buf: [u8; 2] = [0; 2];
 
         self.read_register(Registers::AbcTime, &mut state_buf)?;
-        self.state_buf.copy_from_slice(&state_buf);
+        self.set_data.abc_time = u16::from_be_bytes([state_buf[0], state_buf[1]]);
+        self.read_register(Registers::AbcPar0, &mut state_buf)?;
+        self.set_data.abc_par0 = u16::from_be_bytes([state_buf[0], state_buf[1]]);
+        self.read_register(Registers::AbcPar1, &mut state_buf)?;
+        self.set_data.abc_par1 = u16::from_be_bytes([state_buf[0], state_buf[1]]);
+        self.read_register(Registers::AbcPar2, &mut state_buf)?;
+        self.set_data.abc_par2 = u16::from_be_bytes([state_buf[0], state_buf[1]]);
+        self.read_register(Registers::AbcPar3, &mut state_buf)?;
+        self.set_data.abc_par3 = u16::from_be_bytes([state_buf[0], state_buf[1]]);
+        self.read_register(Registers::FilterPar0, &mut state_buf)?;
+        self.set_data.filter_par0 = u16::from_be_bytes([state_buf[0], state_buf[1]]);
+        self.read_register(Registers::FilterPar1, &mut state_buf)?;
+        self.set_data.filter_par1 = u16::from_be_bytes([state_buf[0], state_buf[1]]);
+        self.read_register(Registers::FilterPar2, &mut state_buf)?;
+        self.set_data.filter_par2 = u16::from_be_bytes([state_buf[0], state_buf[1]]);
+        self.read_register(Registers::FilterPar3, &mut state_buf)?;
+        self.set_data.filter_par3 = u16::from_be_bytes([state_buf[0], state_buf[1]]);
+        self.read_register(Registers::FilterPar4, &mut state_buf)?;
+        self.set_data.filter_par4 = u16::from_be_bytes([state_buf[0], state_buf[1]]);
+        self.read_register(Registers::FilterPar5, &mut state_buf)?;
+        self.set_data.filter_par5 = u16::from_be_bytes([state_buf[0], state_buf[1]]);
+        self.read_register(Registers::FilterPar6, &mut state_buf)?;
+        self.set_data.filter_par6 = u16::from_be_bytes([state_buf[0], state_buf[1]]);
         Ok(())
     }
     /// Compares two values and returns a boolean indicating whether they are equal.
