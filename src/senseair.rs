@@ -230,7 +230,7 @@ where
 
         // Отправляем данные через I2C
         self.comm
-            .write(self.address, &buf)
+            .write_read(self.address, &[0],&mut [0])
             .or_else(|_| self.comm.write(self.address, &buf))?;
 
         self.delay_ms(delay);
